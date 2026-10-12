@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+- Schedule card: an untouched draft now follows a target or lamp schedule changed elsewhere (service call, another browser), instead of showing "Draft differs from target". Edited drafts are left alone.
+- Schedule card: opens on the slot in effect now and marks the current time with a dashed "now" line in the chart and a dashed cell in the hour strip, using Home Assistant's time zone.
+
 ## 0.5.2
 
 - Preserve duplicate schedule slots and app padding through reads, QR exchange, profiles and writes; exclude disabled slots from interpolation and moonlight.

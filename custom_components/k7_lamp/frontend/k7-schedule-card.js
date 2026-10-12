@@ -6,7 +6,7 @@
  * bundled presets come from bitbarista/k7-led-controller (MIT); see NOTICE.md.
  */
 const BASE = "/k7_lamp";
-const VERSION = "0.5.2";
+const VERSION = "0.5.3";
 const COLORS = ["#f5f5f5", "#3b3bff", "#22c55e", "#9b30ff", "#00d5ff", "#ff3030"];
 
 const loaded = {};
@@ -80,6 +80,32 @@ function alignDayStart(schedule, hour) {
 }
 const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—");
 
+// The lamp runs on HA's local time, so "now" uses HA's time zone rather than the browser's.
+function nowHours(timeZone, date = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      .formatToParts(date);
+    const get = (t) => Number(parts.find((p) => p.type === t)?.value);
+    return get("hour") + get("minute") / 60;
+  } catch {
+    return date.getHours() + date.getMinutes() / 60;
+  }
+}
+// Index of the row in effect at `hours`: the latest row at or before it (first of duplicates), else the last row.
+function slotAt(schedule, hours) {
+  const minute = Math.floor(hours * 60);
+  let best = -1;
+  let bestMin = -1;
+  let last = 0;
+  let lastMin = -1;
+  schedule.forEach((r, i) => {
+    const m = r[0] * 60 + r[1];
+    if (m <= minute && m > bestMin) { best = i; bestMin = m; }
+    if (m > lastMin) { last = i; lastMin = m; }
+  });
+  return best >= 0 ? best : last;
+}
+
 function hexToRgb(h) {
   const n = parseInt(h.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -122,9 +148,30 @@ class K7ScheduleCard extends HTMLElement {
       this._last = Date.now();
       const before = JSON.stringify(this._lamp);
       this._refresh().then(() => {
-        if (JSON.stringify(this._lamp) !== before && !this._panel) this._render();
+        if (JSON.stringify(this._lamp) !== before && !this._panel) {
+          this._followBaseline(before);
+          this._render();
+        }
       }).catch(() => {});
     }
+    // Move the "now" line once a minute without rebuilding the card.
+    const minute = Math.floor(Date.now() / 60000);
+    if (this._chart && minute !== this._nowMinute) {
+      this._nowMinute = minute;
+      this._chart.draw();
+    }
+  }
+
+  // An untouched draft follows a target/lamp schedule changed elsewhere; an edited draft is left alone.
+  _followBaseline(beforeJson) {
+    if (!this._draft || !beforeJson) return;
+    const old = JSON.parse(beforeJson);
+    const oldBase = old?.program && old.target ? old.target : { manual: old?.manual, schedule: old?.schedule };
+    if (rowsKey(this._draft) === rowsKey(oldBase)) this._draft = clone(this._baseline());
+  }
+
+  _now() {
+    return nowHours(this._hass?.config?.time_zone);
   }
 
   async _init() {
@@ -140,6 +187,7 @@ class K7ScheduleCard extends HTMLElement {
     try {
       await Promise.all([loadChart(), this._refresh(), this._loadPresets()]);
       this._draft = clone(this._baseline());
+      this._slot = slotAt(this._draft.schedule, this._now());
       this._render();
     } catch (err) {
       this._error(err);
@@ -296,9 +344,10 @@ class K7ScheduleCard extends HTMLElement {
 
   _body() {
     const d = this._draft;
+    const nowSlot = slotAt(d.schedule, this._now());
     const strip = d.schedule
-      .map((r, i) => `<div class="cell ${i === this._slotIndex() ? "sel" : ""}" data-slot="${i}"
-          style="background:${blend(r.slice(2))}" title="${pad(r[0])}:${pad(r[1])}"><span>${pad(r[0])}</span></div>`)
+      .map((r, i) => `<div class="cell ${i === this._slotIndex() ? "sel" : ""} ${i === nowSlot ? "now" : ""}" data-slot="${i}"
+          style="background:${blend(r.slice(2))}" title="${pad(r[0])}:${pad(r[1])}${i === nowSlot ? " (now)" : ""}"><span>${pad(r[0])}</span></div>`)
       .join("");
     const toggles = this._channels
       .map((c, i) => `<label class="tog"><input type="checkbox" data-ch="${i}" ${this._visible[i] ? "checked" : ""}>
@@ -438,8 +487,32 @@ class K7ScheduleCard extends HTMLElement {
     this._chart?.destroy();
     const grid = getComputedStyle(this).getPropertyValue("--divider-color") || "#8884";
     const text = getComputedStyle(this).getPropertyValue("--secondary-text-color") || "#888";
+    const nowLine = {
+      id: "k7NowLine",
+      afterDatasetsDraw: (chart) => {
+        const { ctx, chartArea, scales } = chart;
+        const x = scales.x.getPixelForValue(this._now());
+        if (!chartArea || x < chartArea.left || x > chartArea.right) return;
+        const accent = getComputedStyle(this).getPropertyValue("--primary-color").trim() || "#03a9f4";
+        ctx.save();
+        ctx.strokeStyle = accent;
+        ctx.fillStyle = accent;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x, chartArea.top);
+        ctx.lineTo(x, chartArea.bottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = x > chartArea.right - 30 ? "right" : "left";
+        ctx.fillText("now", x + (ctx.textAlign === "left" ? 4 : -4), chartArea.top + 10);
+        ctx.restore();
+      },
+    };
     this._chart = new window.Chart(canvas, {
       type: "line",
+      plugins: [nowLine],
       data: {
         datasets: this._channels.map((c, ch) => ({
           label: c,
@@ -819,6 +892,7 @@ const STYLE = `
           border: 2px solid transparent; box-sizing: border-box; }
   .cell span { font-size: 9px; color: #888; mix-blend-mode: difference; }
   .cell.sel { border-color: var(--primary-color); }
+  .cell.now:not(.sel) { border: 2px dashed var(--primary-color); }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
   .grow { flex: 1; }
   .toggles { font-size: .85em; gap: 4px 12px; }

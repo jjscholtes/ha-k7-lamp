@@ -141,3 +141,38 @@ for (const c of vectors.cases) {
     }
   });
 }
+
+test('slotAt picks the row in effect, first of duplicates, wrapping before the first row', () => {
+  const {context} = environment();
+  context.rows = [[8,0,1,0,0,0,0,0], [12,0,2,0,0,0,0,0], [12,0,3,0,0,0,0,0], [20,30,0,0,0,0,0,0]];
+  assert.equal(vm.runInContext('slotAt(rows, 12.5)', context), 1);
+  assert.equal(vm.runInContext('slotAt(rows, 20.5)', context), 3);
+  assert.equal(vm.runInContext('slotAt(rows, 7.9)', context), 3);
+  assert.equal(vm.runInContext('slotAt(rows, 8)', context), 0);
+});
+
+test('nowHours uses the given time zone', () => {
+  const {context} = environment();
+  context.d = new Date(Date.UTC(2026, 9, 12, 20, 30));
+  assert.equal(vm.runInContext('nowHours("Europe/Amsterdam", d)', context), 22.5);
+  assert.equal(vm.runInContext('nowHours("UTC", d)', context), 20.5);
+});
+
+test('an untouched draft follows a changed target; an edited draft does not', () => {
+  const oldTarget = {manual: [1,1,1,1,1,1], schedule: [[22,0,0,3,0,0,0,0]]};
+  const newTarget = {manual: [1,1,1,1,1,1], schedule: [[22,0,0,0,0,0,0,0]]};
+  const before = JSON.stringify({entry_id: 'one', program: {}, target: oldTarget});
+
+  const {card} = environment();
+  card._lamp = {entry_id: 'one', program: {}, target: newTarget};
+  card._draft = JSON.parse(JSON.stringify(oldTarget));
+  card._followBaseline(before);
+  assert.deepEqual(JSON.parse(JSON.stringify(card._draft)), newTarget);
+  assert.equal(card._dirty(), false);
+
+  const {card: edited} = environment();
+  edited._lamp = {entry_id: 'one', program: {}, target: newTarget};
+  edited._draft = {manual: [1,1,1,1,1,1], schedule: [[22,0,9,9,9,9,9,9]]};
+  edited._followBaseline(before);
+  assert.deepEqual(JSON.parse(JSON.stringify(edited._draft.schedule)), [[22,0,9,9,9,9,9,9]]);
+});

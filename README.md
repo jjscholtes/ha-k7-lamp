@@ -83,7 +83,7 @@ If your dashboards are in **YAML mode**, add the resource yourself:
 ```yaml
 lovelace:
   resources:
-    - url: /k7_lamp/k7-schedule-card.js?v=0.5.2
+    - url: /k7_lamp/k7-schedule-card.js?v=0.5.3
       type: module
 ```
 
