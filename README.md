@@ -6,7 +6,7 @@ Local control of a **Noo-Psyche K7 Pro** reef light from Home Assistant, over yo
 
 <p align="center"><img src="docs/card.png" alt="Schedule editor card" width="560"></p>
 
-*The schedule card during an acclimation. The stacked chart shows the full target (height is total light, layers are the spectrum); the dashed line is what the lamp runs today at 25 %. Switch to **Today** to see that instead.*
+*The schedule card during an acclimation. The stacked chart shows the full target (height is total light, layers are the spectrum); the dashed line is what the lamp runs today, at this day's acclimation step. Switch to **Today** to see that instead.*
 
 Looking for a complete setup? [`examples/aquarium`](examples/aquarium) has a full aquarium dashboard with feed and water-change buttons, leak and power-outage alerts and energy tracking, built around this card.
 
@@ -99,7 +99,7 @@ lovelace:
   - **Level at full moon:** 15% by default.
   - **Channels:** Royal Blue 100% and Cyan 70% by default.
   - **Only while the moon is up:** limits moonlight to moonrise–moonset.
-  - The line under the chart shows tonight's moon. Tick **Show what the lamp runs** to see the actual plan as dashed lines.
+  - The **Moon** row shows tonight's moon. Switch the chart to **Today** (or **Lamp**) to see the actual plan; the other schedule stays visible as a dashed line.
 
 ## Limitations
 
