@@ -1,0 +1,667 @@
+# Dashboard (paste into the raw configuration editor) for the k7_lamp aquarium example. See README.md in this folder.
+# Entity IDs are placeholders: replace them with your own (see the table in README.md).
+
+views:
+- title: Overview
+  path: overview
+  type: sections
+  max_columns: 3
+  header:
+    layout: responsive
+    badges_position: bottom
+    card:
+      type: markdown
+      text_only: true
+      content: |-
+        {%- set leak = is_state('binary_sensor.aquarium_leak_sensor','on') -%}
+        {%- set outage = is_state('input_boolean.aquarium_power_outage','on') -%}
+        {%- set pump_fault = ['communication_error','motor_overcurrent','motor_overvoltage','motor_stall','motor_undervoltage','no_load','over_temperature'] | map('regex_replace','^','binary_sensor.return_pump_') | select('is_state','on') | list | count > 0 -%}
+        {%- set lamp_down = is_state('binary_sensor.k7_lamp_connected','off') -%}
+        {%- set feeding = is_state('timer.aquarium_feed_pause','active') -%}
+        {%- set water_change = is_state('timer.aquarium_water_change','active') -%}
+        {%- set sched = state_attr('sensor.k7_lamp_mode','schedule') or [] -%}
+        {%- set h = now().hour -%}
+        {%- set light = namespace(on=false, next=none) -%}
+        {%- if sched | count == 24 -%}
+        {%- set light.on = (sched[h].values() | select('number') | sum) > 0 -%}
+        {%- for i in range(1, 25) -%}{%- set s = sched[(h + i) % 24] -%}{%- if light.next is none and ((s.values() | select('number') | sum) > 0) != light.on -%}{%- set light.next = s.time -%}{%- endif -%}{%- endfor -%}
+        {%- endif -%}
+        {%- set acc = states.sensor.k7_lamp_acclimation_intensity -%}
+        {%- if leak -%}# 🚨 Leak in the cabinet
+        {%- elif outage -%}# ⚡ Power outage
+        {%- elif pump_fault -%}# ⚠️ Pump fault
+        {%- elif lamp_down -%}# ⚠️ Lamp unreachable
+        {%- elif feeding -%}# 🐟 Feed pause
+        {%- elif water_change -%}# 💧 Water change in progress
+        {%- else -%}# All good
+        {%- endif %}
+        {{ '💡 Light on' if light.on else '🌙 Light off' }}{{ (' · ' ~ ('off' if light.on else 'on') ~ ' at ' ~ light.next) if light.next }}{% if acc and acc.attributes.active %} · acclimation day {{ acc.attributes.day + 1 }} of {{ acc.attributes.days }} ({{ acc.state }}%){% endif %}
+  badges:
+  - type: entity
+    entity: binary_sensor.aquarium_leak_sensor
+    name: Leak sensor
+    show_name: true
+    show_state: true
+    icon: mdi:water-check
+    color: red
+  - type: entity
+    entity: switch.return_pump_power
+    name: Pump
+    show_name: true
+    show_state: true
+    icon: mdi:pump
+    color: cyan
+    tap_action:
+      action: more-info
+  - type: entity
+    entity: sensor.aquarium_power
+    name: Power
+    show_name: true
+    show_state: true
+    icon: mdi:flash
+    color: amber
+    tap_action:
+      action: navigate
+      navigation_path: /aquarium/energy
+  - type: entity
+    entity: binary_sensor.k7_lamp_connected
+    name: Lamp
+    show_name: true
+    show_state: true
+    color: red
+    visibility:
+    - condition: state
+      entity: binary_sensor.k7_lamp_connected
+      state: 'off'
+  - type: entity
+    entity: sensor.k7_lamp_mode
+    name: Lamp
+    show_name: true
+    show_state: true
+    icon: mdi:hand-back-right
+    color: orange
+    visibility:
+    - condition: state
+      entity: sensor.k7_lamp_mode
+      state_not: auto
+  - type: entity
+    entity: binary_sensor.aquarium_leak_sensor_battery_low
+    name: Leak sensor battery
+    show_name: true
+    show_state: true
+    color: orange
+    visibility:
+    - condition: state
+      entity: binary_sensor.aquarium_leak_sensor_battery_low
+      state: 'on'
+  sections:
+  - type: grid
+    column_span: 3
+    background:
+      color: red
+      opacity: 20
+    visibility:
+    - condition: or
+      conditions:
+      - condition: state
+        entity: binary_sensor.aquarium_leak_sensor
+        state: 'on'
+      - condition: state
+        entity: input_boolean.aquarium_power_outage
+        state: 'on'
+      - condition: or
+        conditions:
+        - condition: state
+          entity: binary_sensor.return_pump_communication_error
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_motor_overcurrent
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_motor_overvoltage
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_motor_stall
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_motor_undervoltage
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_no_load
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_over_temperature
+          state: 'on'
+      - condition: state
+        entity: binary_sensor.k7_lamp_connected
+        state: 'off'
+    cards:
+    - type: heading
+      heading: Status
+      heading_style: title
+      icon: mdi:alert
+    - type: markdown
+      visibility:
+      - condition: state
+        entity: binary_sensor.aquarium_leak_sensor
+        state: 'on'
+      content: 🚨 **Leak detected in the cabinet.** The return pump has been switched off. Switch the pumps back on once everything
+        is dry.
+    - type: markdown
+      visibility:
+      - condition: state
+        entity: input_boolean.aquarium_power_outage
+        state: 'on'
+      content: ⚡ **Power outage.** The power strip has been unreachable for more than 2 minutes.
+    - type: markdown
+      visibility:
+      - condition: or
+        conditions:
+        - condition: state
+          entity: binary_sensor.return_pump_communication_error
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_motor_overcurrent
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_motor_overvoltage
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_motor_stall
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_motor_undervoltage
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_no_load
+          state: 'on'
+        - condition: state
+          entity: binary_sensor.return_pump_over_temperature
+          state: 'on'
+      content: ⚠️ **Pump fault.** Check the return pump.
+    - type: markdown
+      visibility:
+      - condition: state
+        entity: binary_sensor.k7_lamp_connected
+        state: 'off'
+      content: 💡 **Lamp unreachable.** The lamp keeps running its own schedule, but Home Assistant can't see it.
+    - type: tile
+      entity: script.aquarium_pumps_on
+      name: Pumps back on
+      icon: mdi:play-circle
+      color: green
+      state_content: name
+      grid_options:
+        columns: 12
+      tap_action:
+        action: perform-action
+        perform_action: script.aquarium_pumps_on
+      icon_tap_action:
+        action: perform-action
+        perform_action: script.aquarium_pumps_on
+      visibility:
+      - condition: state
+        entity: binary_sensor.aquarium_leak_sensor
+        state: 'on'
+  - type: grid
+    cards:
+    - type: heading
+      heading: Maintenance
+      heading_style: title
+      icon: mdi:hand-wave-outline
+    - type: shortcut
+      label: Feed
+      description: Pumps off for 10 min
+      icon: mdi:fish
+      color: orange
+      vertical: true
+      grid_options:
+        columns: 6
+        rows: 2
+      tap_action:
+        action: perform-action
+        perform_action: script.aquarium_feed
+      visibility:
+      - condition: state
+        entity: timer.aquarium_feed_pause
+        state_not: active
+      - condition: state
+        entity: timer.aquarium_water_change
+        state_not: active
+    - type: shortcut
+      label: Water change
+      description: Pumps off for 30 min
+      icon: mdi:water-sync
+      color: blue
+      vertical: true
+      grid_options:
+        columns: 6
+        rows: 2
+      tap_action:
+        action: perform-action
+        perform_action: script.aquarium_water_change
+        confirmation:
+          text: Switch the return pump and wavemaker off for 30 minutes for a water change? The heater stays on.
+      visibility:
+      - condition: state
+        entity: timer.aquarium_feed_pause
+        state_not: active
+      - condition: state
+        entity: timer.aquarium_water_change
+        state_not: active
+    - type: entities
+      state_color: true
+      visibility:
+      - condition: or
+        conditions:
+        - condition: state
+          entity: timer.aquarium_feed_pause
+          state: active
+        - condition: state
+          entity: timer.aquarium_water_change
+          state: active
+      entities:
+      - entity: timer.aquarium_feed_pause
+        name: Feed pause
+      - entity: timer.aquarium_water_change
+        name: Water change
+    - type: tile
+      entity: script.aquarium_pumps_on
+      name: Pumps back on now
+      icon: mdi:play-circle
+      color: green
+      state_content: name
+      grid_options:
+        columns: 12
+      tap_action:
+        action: perform-action
+        perform_action: script.aquarium_pumps_on
+      icon_tap_action:
+        action: perform-action
+        perform_action: script.aquarium_pumps_on
+      visibility:
+      - condition: or
+        conditions:
+        - condition: state
+          entity: timer.aquarium_feed_pause
+          state: active
+        - condition: state
+          entity: timer.aquarium_water_change
+          state: active
+  - type: grid
+    cards:
+    - type: heading
+      heading: Light
+      heading_style: title
+      icon: mdi:lightbulb-outline
+      tap_action:
+        action: navigate
+        navigation_path: /aquarium/lamp
+      badges:
+      - type: entity
+        entity: sensor.k7_lamp_mode
+        show_state: true
+        show_icon: true
+    - type: tile
+      entity: sensor.k7_lamp_acclimation_intensity
+      name: Acclimation
+      color: indigo
+      icon: mdi:sun-clock-outline
+      grid_options:
+        columns: 12
+      features:
+      - type: bar-gauge
+        min: 0
+        max: 100
+    - type: shortcut
+      label: Daily schedule
+      description: Edit the curve and channels
+      icon: mdi:chart-bell-curve
+      color: indigo
+      grid_options:
+        columns: 12
+      tap_action:
+        action: navigate
+        navigation_path: /aquarium/lamp
+  - type: grid
+    cards:
+    - type: heading
+      heading: Flow
+      heading_style: title
+      icon: mdi:waves
+    - type: tile
+      entity: switch.return_pump_power
+      name: Return pump
+      icon: mdi:pump
+      color: cyan
+      grid_options:
+        columns: 6
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: more-info
+    - type: tile
+      entity: select.return_pump_mode
+      name: Mode
+      icon: mdi:waves
+      color: cyan
+      grid_options:
+        columns: 6
+      tap_action:
+        action: more-info
+    - type: tile
+      entity: number.return_pump_flow_rate
+      name: Flow
+      icon: mdi:speedometer
+      color: cyan
+      features:
+      - type: numeric-input
+        style: slider
+      features_position: inline
+      grid_options:
+        columns: 12
+  - type: grid
+    column_span: 2
+    cards:
+    - type: heading
+      heading: Power strip
+      heading_style: title
+      icon: mdi:power-socket-eu
+      badges:
+      - type: entity
+        entity: sensor.aquarium_power
+        show_state: true
+        show_icon: true
+        color: amber
+    - type: distribution
+      grid_options:
+        columns: full
+      entities:
+      - entity: sensor.power_strip_wavemaker_power
+        name: Wavemaker
+        color: light-blue
+      - entity: sensor.power_strip_return_pump_power
+        name: Return pump
+        color: cyan
+      - entity: sensor.power_strip_lamp_power
+        name: Lamp
+        color: amber
+      - entity: sensor.power_strip_heater_power
+        name: Heater
+        color: deep-orange
+    - type: tile
+      entity: switch.power_strip_wavemaker
+      name: Wavemaker
+      icon: mdi:waves-arrow-right
+      color: light-blue
+      state_content:
+      - state
+      - last_changed
+      grid_options:
+        columns: 6
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: toggle
+        confirmation:
+          text: Switch the wavemaker off or on? This cuts or restores its power.
+    - type: tile
+      entity: switch.power_strip_return_pump
+      name: Return pump
+      icon: mdi:pump
+      color: cyan
+      state_content:
+      - state
+      - last_changed
+      grid_options:
+        columns: 6
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: toggle
+        confirmation:
+          text: Switch the return pump off or on? This cuts or restores its power.
+    - type: tile
+      entity: switch.power_strip_lamp
+      name: Lamp
+      icon: mdi:lightbulb-on-outline
+      color: amber
+      state_content:
+      - state
+      - last_changed
+      grid_options:
+        columns: 6
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: toggle
+        confirmation:
+          text: Switch the lamp off or on? This cuts or restores its power.
+    - type: tile
+      entity: switch.power_strip_heater
+      name: Heater
+      icon: mdi:radiator
+      color: deep-orange
+      state_content:
+      - state
+      - last_changed
+      grid_options:
+        columns: 6
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: toggle
+        confirmation:
+          text: Switch the heater off or on? This cuts or restores its power.
+  - type: grid
+    cards:
+    - type: heading
+      heading: Energy use
+      heading_style: title
+      icon: mdi:lightning-bolt-outline
+      tap_action:
+        action: navigate
+        navigation_path: /aquarium/energy
+    - type: tile
+      entity: sensor.aquarium_energy_today
+      name: Today
+      icon: mdi:lightning-bolt
+      color: amber
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: sensor.aquarium_energy_this_month
+      name: This month
+      icon: mdi:calendar-month
+      color: amber
+      grid_options:
+        columns: 6
+    - type: shortcut
+      label: Energy
+      description: Power and energy per day
+      icon: mdi:chart-bar
+      color: amber
+      grid_options:
+        columns: 12
+      tap_action:
+        action: navigate
+        navigation_path: /aquarium/energy
+- title: Light
+  path: lamp
+  type: sections
+  max_columns: 3
+  sections:
+  - type: grid
+    column_span: 2
+    cards:
+    - type: custom:k7-schedule-card
+      title: Daily schedule
+      grid_options:
+        columns: full
+  - type: grid
+    cards:
+    - type: heading
+      heading: Lamp
+      heading_style: title
+      icon: mdi:lightbulb-outline
+    - type: tile
+      entity: binary_sensor.k7_lamp_connected
+      name: Connection
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: sensor.k7_lamp_mode
+      name: Mode
+      icon: mdi:calendar-clock
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: sensor.k7_lamp_acclimation_intensity
+      name: Acclimation
+      color: indigo
+      icon: mdi:sun-clock-outline
+      grid_options:
+        columns: 12
+      features:
+      - type: bar-gauge
+        min: 0
+        max: 100
+    - type: tile
+      entity: button.k7_lamp_sync_clock
+      name: Sync clock
+      icon: mdi:clock-check-outline
+      state_content: state
+      grid_options:
+        columns: 12
+      tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.k7_lamp_sync_clock
+    - type: tile
+      entity: switch.power_strip_lamp
+      name: Lamp power
+      icon: mdi:power-plug
+      color: amber
+      state_content:
+      - state
+      - last_changed
+      grid_options:
+        columns: 12
+      tap_action:
+        action: more-info
+      icon_tap_action:
+        action: toggle
+        confirmation:
+          text: Switch the lamp's power off or on?
+- title: Energy
+  path: energy
+  type: sections
+  max_columns: 3
+  sections:
+  - type: grid
+    column_span: 3
+    cards:
+    - type: heading
+      heading: Power, last 24 hours
+      heading_style: title
+      icon: mdi:flash
+    - type: custom:mini-graph-card
+      name: Power
+      icon: mdi:flash
+      hours_to_show: 24
+      points_per_hour: 6
+      line_width: 2
+      height: 70
+      show:
+        legend: true
+        fill: false
+        points: false
+        state: true
+        labels: false
+        name: false
+        icon: false
+      entities:
+      - entity: sensor.aquarium_power
+        name: Total
+        color: '#e0e0e0'
+        show_state: true
+      - entity: sensor.power_strip_wavemaker_power
+        name: Wavemaker
+        color: '#4fc3f7'
+        show_state: false
+        show_legend_state: true
+      - entity: sensor.power_strip_return_pump_power
+        name: Return pump
+        color: '#26c6da'
+        show_state: false
+        show_legend_state: true
+      - entity: sensor.power_strip_lamp_power
+        name: Lamp
+        color: '#ffc107'
+        show_state: false
+        show_legend_state: true
+      - entity: sensor.power_strip_heater_power
+        name: Heater
+        color: '#ff7043'
+        show_state: false
+        show_legend_state: true
+      grid_options:
+        columns: full
+        rows: auto
+  - type: grid
+    column_span: 2
+    cards:
+    - type: heading
+      heading: Energy per day
+      heading_style: title
+      icon: mdi:chart-bar
+    - type: statistics-graph
+      entities:
+      - entity: sensor.aquarium_energy
+        name: Aquarium
+      stat_types:
+      - change
+      period: day
+      days_to_show: 30
+      chart_type: bar
+      hide_legend: true
+      grid_options:
+        columns: full
+        rows: 6
+  - type: grid
+    cards:
+    - type: heading
+      heading: Totals
+      heading_style: title
+      icon: mdi:sigma
+    - type: tile
+      entity: sensor.aquarium_energy_today
+      name: Today
+      icon: mdi:lightning-bolt
+      color: amber
+      grid_options:
+        columns: 12
+    - type: tile
+      entity: sensor.aquarium_energy_this_month
+      name: This month
+      icon: mdi:calendar-month
+      color: amber
+      grid_options:
+        columns: 12
+    - type: distribution
+      grid_options:
+        columns: full
+      entities:
+      - entity: sensor.power_strip_wavemaker_power
+        name: Wavemaker
+        color: light-blue
+      - entity: sensor.power_strip_return_pump_power
+        name: Return pump
+        color: cyan
+      - entity: sensor.power_strip_lamp_power
+        name: Lamp
+        color: amber
+      - entity: sensor.power_strip_heater_power
+        name: Heater
+        color: deep-orange

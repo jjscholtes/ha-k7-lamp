@@ -1,0 +1,76 @@
+# Scripts (merge into scripts.yaml) for the k7_lamp aquarium example. See README.md in this folder.
+# Entity IDs are placeholders: replace them with your own (see the table in README.md).
+
+aquarium_pumps_on:
+  alias: Aquarium pumps back on
+  description: 'Ends a feed pause or water change: cancel the timers, return pump on and out of feed mode, wavemaker outlet
+    on.'
+  icon: mdi:pump
+  mode: queued
+  sequence:
+  - action: timer.cancel
+    target:
+      entity_id:
+      - timer.aquarium_feed_pause
+      - timer.aquarium_water_change
+  - action: switch.turn_on
+    target:
+      entity_id: switch.power_strip_wavemaker
+  - action: switch.turn_on
+    target:
+      entity_id: switch.return_pump_power
+    continue_on_error: true
+  - if:
+    - condition: state
+      entity_id: select.return_pump_mode
+      state: feeding
+    then:
+    - action: select.select_option
+      target:
+        entity_id: select.return_pump_mode
+      data:
+        option: '{{ states(''select.return_pump_automode'') if states(''select.return_pump_automode'') not in [''feeding'',''unknown'',''unavailable'']
+          else ''constant_flow'' }}'
+      continue_on_error: true
+aquarium_feed:
+  alias: Aquarium feed
+  description: Return pump in feed mode and wavemaker off; after the feed pause the timer switches everything back on.
+  icon: mdi:fish
+  mode: restart
+  sequence:
+  - action: timer.cancel
+    target:
+      entity_id: timer.aquarium_water_change
+  - action: select.select_option
+    target:
+      entity_id: select.return_pump_mode
+    data:
+      option: feeding
+    continue_on_error: true
+  - action: switch.turn_off
+    target:
+      entity_id: switch.power_strip_wavemaker
+  - action: timer.start
+    target:
+      entity_id: timer.aquarium_feed_pause
+    data:
+      duration: '{{ (states(''number.return_pump_feed_duration'') | int(10)) * 60 }}'
+aquarium_water_change:
+  alias: Aquarium water change
+  description: Return pump and wavemaker off for maintenance; the heater stays on. After 30 minutes the timer switches everything
+    back on.
+  icon: mdi:water-sync
+  mode: restart
+  sequence:
+  - action: timer.cancel
+    target:
+      entity_id: timer.aquarium_feed_pause
+  - action: switch.turn_off
+    target:
+      entity_id: switch.return_pump_power
+  - action: switch.turn_off
+    target:
+      entity_id: switch.power_strip_wavemaker
+  - action: timer.start
+    target:
+      entity_id: timer.aquarium_water_change

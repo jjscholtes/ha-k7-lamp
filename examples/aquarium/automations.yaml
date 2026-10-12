@@ -1,0 +1,151 @@
+# Automations (merge into automations.yaml) for the k7_lamp aquarium example. See README.md in this folder.
+# Entity IDs are placeholders: replace them with your own (see the table in README.md).
+
+- id: aquarium_leak_detected
+  alias: 'Aquarium: leak detected'
+  description: 'Leak sensor in the cabinet wet: return pump off, running pause timers cancelled (so they can''t switch the
+    pump back on) and a critical notification. The pump only goes back on via ''Pumps back on now''.'
+  triggers:
+  - trigger: state
+    entity_id: binary_sensor.aquarium_leak_sensor
+    from:
+    - 'off'
+    - unknown
+    to: 'on'
+  conditions: []
+  actions:
+  - action: timer.cancel
+    target:
+      entity_id:
+      - timer.aquarium_feed_pause
+      - timer.aquarium_water_change
+  - action: switch.turn_off
+    target:
+      entity_id: switch.return_pump_power
+    continue_on_error: true
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 💧 Aquarium leak!
+      message: The leak sensor in the cabinet is wet. The return pump has been switched off; heater and wavemaker keep running.
+        Switch the pump back on with 'Pumps back on now' once everything is dry.
+      data:
+        push:
+          interruption-level: critical
+          sound:
+            name: default
+            critical: 1
+            volume: 1.0
+  mode: single
+- id: aquarium_leak_sensor_battery_low
+  alias: 'Aquarium: leak sensor battery low'
+  description: Reminder to replace the leak sensor battery.
+  triggers:
+  - trigger: state
+    entity_id: binary_sensor.aquarium_leak_sensor_battery_low
+    from: 'off'
+    to: 'on'
+  conditions: []
+  actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      title: Aquarium leak sensor
+      message: The battery of the leak sensor in the aquarium cabinet is almost empty.
+  mode: single
+- id: aquarium_sync_lamp_clock_after_an_interruption
+  alias: 'Aquarium: sync lamp clock after an interruption'
+  description: After a power cut or lost connection the K7's clock may be wrong; sync it as soon as the lamp is reachable
+    again.
+  triggers:
+  - trigger: state
+    entity_id: binary_sensor.k7_lamp_connected
+    from:
+    - 'off'
+    - unavailable
+    to: 'on'
+  - trigger: state
+    entity_id: switch.power_strip_lamp
+    from: 'off'
+    to: 'on'
+  conditions: []
+  actions:
+  - delay:
+      minutes: 1
+  - action: button.press
+    target:
+      entity_id: button.k7_lamp_sync_clock
+  mode: restart
+- id: aquarium_pumps_on_after_feed_pause_or_water_change
+  alias: 'Aquarium: pumps on after feed pause or water change'
+  description: When an aquarium timer finishes (also if that happened during a restart), the pumps go back on.
+  triggers:
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: timer.aquarium_feed_pause
+  - trigger: event
+    event_type: timer.finished
+    event_data:
+      entity_id: timer.aquarium_water_change
+  conditions: []
+  actions:
+  - action: script.aquarium_pumps_on
+  mode: queued
+- id: aquarium_power_outage
+  alias: 'Aquarium: power outage'
+  description: 'Power strip unreachable for >2 minutes = power outage (or Wi-Fi trouble) at the aquarium: critical notification,
+    and another when it''s back. Only works while Home Assistant itself still has power.'
+  triggers:
+  - trigger: state
+    entity_id: switch.power_strip_return_pump
+    from:
+    - 'on'
+    - 'off'
+    to: unavailable
+    for:
+      minutes: 2
+    id: weg
+  - trigger: state
+    entity_id: switch.power_strip_return_pump
+    from: unavailable
+    to:
+    - 'on'
+    - 'off'
+    id: terug
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: weg
+      sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.aquarium_power_outage
+      - action: notify.mobile_app_your_phone
+        data:
+          title: ⚡ Aquarium power outage
+          message: The aquarium power strip has been unreachable for 2 minutes. Pump, heater, lamp and wavemaker may have
+            no power.
+          data:
+            push:
+              interruption-level: critical
+              sound:
+                name: default
+                critical: 1
+                volume: 1.0
+    - conditions:
+      - condition: trigger
+        id: terug
+      - condition: state
+        entity_id: input_boolean.aquarium_power_outage
+        state: 'on'
+      sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.aquarium_power_outage
+      - action: notify.mobile_app_your_phone
+        data:
+          title: ✅ Aquarium power restored
+          message: The power strip is reachable again; all outlets switch back on by themselves. The lamp clock is synced
+            as soon as the lamp reconnects.
+  mode: queued

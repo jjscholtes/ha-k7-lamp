@@ -4,6 +4,7 @@
 
 - Schedule card: an untouched draft now follows a target or lamp schedule changed elsewhere (service call, another browser), instead of showing "Draft differs from target". Edited drafts are left alone.
 - Schedule card: opens on the slot in effect now and marks the current time with a dashed "now" line in the chart and a dashed cell in the hour strip, using Home Assistant's time zone.
+- Docs: card screenshot in the README and a complete aquarium dashboard example (`examples/aquarium`) with feed/water-change scripts, leak and power-outage alerts and energy tracking.
 
 ## 0.5.2
 
