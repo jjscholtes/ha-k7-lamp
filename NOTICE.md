@@ -27,7 +27,5 @@ level per channel follows bitbarista's lunar overlay (Royal Blue, Cyan at 70%).
 
 | File | Project | Licence |
 |------|---------|---------|
-| chart.umd.min.js | Chart.js 4.4.3 | MIT |
-| chartjs-plugin-dragdata.min.js | chartjs-plugin-dragdata | MIT |
 | jsQR.js | jsQR 1.4.0 (cozmo/jsQR) | Apache-2.0 |
 | qrcode.min.js | QRCode.js (davidshimjs) | MIT, see qrcodejs.LICENSE.txt |

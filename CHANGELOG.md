@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0
+
+- Schedule card redesign. The chart is now a stacked area of the channels (height = total light, layers = spectrum), drawn in plain SVG at the card's real width; Chart.js and its drag plugin are no longer bundled.
+- A segmented control switches between the target/draft and what the lamp runs today (acclimation step, moonlight); the other one stays visible as a dashed line. Switching animates.
+- Hovering shows the time and total; tapping the chart or the hour strip selects a slot; sliders update the chart live. Dragging points in the chart is gone (edit with the sliders).
+- New look: soft gradients, a glowing "now" marker, an iOS-style settings list, channel chips, switches and sliders, with separate light and dark themes that follow Home Assistant.
+- Dutch translation, used when Home Assistant's language is Dutch (including moon phases and dates).
+- The hour strip shows each slot's light colour with opacity by level, so dim slots no longer look darker than dark ones.
+
 ## 0.5.3
 
 - Schedule card: an untouched draft now follows a target or lamp schedule changed elsewhere (service call, another browser), instead of showing "Draft differs from target". Edited drafts are left alone.

@@ -136,7 +136,7 @@ The daily plan rules live in `planner.py` without Home Assistant imports and are
 
 - **[bitbarista/k7-led-controller](https://github.com/bitbarista/k7-led-controller)** (MIT): the K7 protocol, the app QR format, the presets and the editor design.
 - **[SunCalc](https://github.com/mourner/suncalc)** (BSD-2): the moon position and illumination algorithm, ported to Python.
-- **Bundled libraries:** Chart.js and chartjs-plugin-dragdata (MIT), jsQR (Apache-2.0), QRCode.js (MIT). See [NOTICE.md](NOTICE.md).
+- **Bundled libraries:** jsQR (Apache-2.0), QRCode.js (MIT). The schedule chart is plain SVG. See [NOTICE.md](NOTICE.md).
 
 ## License
 

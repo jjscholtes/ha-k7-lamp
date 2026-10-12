@@ -2,12 +2,139 @@
  * K7 schedule editor card for the k7_lamp integration.
  *
  * Edits the lamp's 24-point schedule, imports/exports Noo-Psyche app QR codes
- * and applies the result with one ALL_SET. Editor design, QR format and the
+ * and applies the result with one ALL_SET. The chart is plain SVG: a stacked area
+ * of the channels, drawn at the card's real width. Editor design, QR format and the
  * bundled presets come from bitbarista/k7-led-controller (MIT); see NOTICE.md.
  */
 const BASE = "/k7_lamp";
-const VERSION = "0.5.3";
+const VERSION = "0.6.0";
+// Physical LED colours: only used to mix the light colour of a slot (strip and chart backdrop).
 const COLORS = ["#f5f5f5", "#3b3bff", "#22c55e", "#9b30ff", "#00d5ff", "#ff3030"];
+// Chart colours per theme. Blue/UV and red/green stay close for colour-blind readers,
+// so every colour is always shown next to its channel name.
+const CHANNEL_COLORS = {
+  dark: ["#f2f2f7", "#5e7bff", "#32d583", "#bf5af2", "#64d2ff", "#ff6961"],
+  light: ["#48484a", "#3456e0", "#1f8a45", "#a62fba", "#0b8fb0", "#d6382c"],
+};
+// Bottom to top in the stacked chart: the strongest channels of a reef profile first.
+const STACK = [1, 4, 0, 3, 2, 5];
+
+const STRINGS = {
+  en: {
+    title: "K7 schedule", auto: "Auto", manual: "Manual", offline: "Offline",
+    differs_target: "Draft differs from target", differs_lamp: "Draft differs from lamp",
+    matches_target: "Matches target", matches_lamp: "Matches lamp",
+    pending: "A plan update is pending. It will retry in the next safe window, or you can apply now.",
+    loading: "Loading…",
+    acc: "Acclimation", acc_day: "day {d} of {n}", acc_range: "{s}% → 100%, ends {e}",
+    acc_window: "Daily update window starts at {t}.", acc_nowindow: "No safe dark interval; automatic updates are paused.",
+    acc_confirmed: "Last confirmed: {p}.", unknown: "unknown", stop: "Stop…",
+    seg_target: "Target", seg_draft: "Draft", seg_today: "Today", seg_lamp: "Lamp",
+    now: "Now", dark: "dark", on_at: "on at {t}", full: "full light", rising: "ramping up", falling: "ramping down",
+    day_starts: "Day starts at", not_set: "not set", shift_to: "Shift to {h}",
+    photoperiod: "Photoperiod", no_dark: "no dark period to shift", h: "h",
+    moon: "Moon", rises: "rises", sets: "sets",
+    moon_now: "moonlight now {p}%", moon_on: "moonlight on (up to {p}%)", moon_off: "moonlight off",
+    align: "Align loaded profiles", channels: "Channels", linked: "Move together",
+    slot_dark: "dark", slot_today: "today {p}%",
+    load: "Load a schedule…", cur_lamp: "Current lamp schedule", saved: "Saved profiles", presets: "Presets (bitbarista)",
+    community: "(community)", legacy: "Original (legacy, lamp unknown)",
+    save_as: "Save as…", delete: "Delete", really_delete: "Really delete \"{n}\"?",
+    import: "Import QR", export: "Show QR", sync: "Sync clock", acclimate: "Acclimate…", moonlight: "Moonlight…",
+    revert: "Revert", update_target: "Update target", apply_lamp: "Apply to lamp",
+    no_changes: "No changes", unsaved: "Unsaved changes", update_pending: "Update pending",
+    cancel: "Cancel", close: "Close",
+    confirm_acc: "This becomes the new acclimation target. The lamp gets it right away at today's <b>{p}%</b>, then rises daily as planned.",
+    confirm_lamp: "This rewrites the lamp's stored schedule and puts it in <b>auto</b> mode with the current time.",
+    confirm_pause: "The lamp pauses for a few seconds and its output resets.", write: "Write to lamp",
+    acc_intro: "Ramp up linearly to the <b>schedule in the editor</b> (the full target). Today's step is written now; after that {w}.",
+    acc_intro_w: "the daily update window starts at {t}, in the target's dark interval",
+    acc_intro_nw: "automatic updates require a dark interval in the target schedule",
+    start_at: "Start at", over: "over", days: "days", start_acc: "Start acclimation",
+    moon_intro: "Night-time light that follows the real moon over your home: brightness tracks the moon's illumination. {w} Daylight hours are never dimmed; the moon level is only used where it's brighter than your schedule.",
+    moon_intro_w: "The daily update window starts at {t}, in the target's dark interval.",
+    moon_intro_nw: "Automatic updates are paused until the target has a dark interval.",
+    moon_enabled: "Moonlight on", moon_level: "Level at full moon", moon_follow: "Only while the moon is up",
+    moon_share: "Share of the moon level per channel (0 = off):", moon_save: "Save moonlight",
+    stop_q: "Stop the acclimation now?", keep_conf: "Keep confirmed {p}", go_full: "Go to the full schedule",
+    profile_name: "Profile name", save: "Save",
+    import_intro: "Paste the QR text, choose a screenshot or photo of the QR code, or scan it with the camera.",
+    image: "Image…", camera: "Camera", stop_camera: "Stop camera", load_text: "Load text", copy: "Copy text",
+    m_day_cleared: "Day start cleared.", m_day_is: "Day starts at {h}.", m_day_shift: "Draft shifted to start at {h}. Apply to send it to the lamp.",
+    m_loaded_lamp: "Loaded the current schedule.", m_loaded: "Loaded into the draft.{n} Nothing changes on the lamp until you apply.",
+    m_writing: "Writing schedule to the lamp…", m_acc_updated: "Acclimation target updated.",
+    m_written: "Schedule written. The lamp is in auto mode.", m_same: "The lamp already had this schedule; nothing written.",
+    m_reset_acc: "Draft reset to the acclimation target.", m_reset_lamp: "Draft reset to the lamp's schedule.",
+    m_moon_range: "Level at full moon must be 1–50%.", m_moon_saving: "Saving moonlight…",
+    m_moon_saved: "Moonlight saved; the lamp has tonight's moon.", m_moon_off: "Moonlight off.",
+    m_shifted: "Draft shifted.{n} Apply to send it to the lamp.",
+    m_acc_range: "Start must be 1–99% and duration 1–120 days.", m_acc_starting: "Starting acclimation…",
+    m_acc_started: "Acclimation started at {s}% over {d} days.",
+    m_acc_kept: "Acclimation stopped; the lamp keeps the reduced schedule.", m_acc_full: "Acclimation stopped; full schedule written.",
+    m_synced: "Lamp clock set to Home Assistant's local time.", m_saved: "Saved profile \"{n}\".", m_deleted: "Deleted profile \"{n}\".",
+    m_copied: "QR text copied.", m_qr_loaded: "QR code loaded into the draft.{n} Check it, then apply.",
+    m_no_qr: "No QR code found in that image. Try a sharper or closer crop.",
+    m_no_camera: "Camera not available here (needs HTTPS). Use an image instead.",
+    m_aligned: " Shifted {d} h to start at {h}.",
+  },
+  nl: {
+    title: "K7-schema", auto: "Auto", manual: "Handmatig", offline: "Offline",
+    differs_target: "Concept wijkt af van doel", differs_lamp: "Concept wijkt af van lamp",
+    matches_target: "Gelijk aan doel", matches_lamp: "Gelijk aan lamp",
+    pending: "Er staat een update klaar. Die wordt in het volgende veilige moment opnieuw geprobeerd, of je stuurt hem nu.",
+    loading: "Laden…",
+    acc: "Acclimatisatie", acc_day: "dag {d} van {n}", acc_range: "{s}% → 100%, klaar op {e}",
+    acc_window: "Dagelijkse update vanaf {t}.", acc_nowindow: "Geen veilige donkere periode; automatische updates staan stil.",
+    acc_confirmed: "Laatst bevestigd: {p}.", unknown: "onbekend", stop: "Stop…",
+    seg_target: "Doel", seg_draft: "Concept", seg_today: "Vandaag", seg_lamp: "Lamp",
+    now: "Nu", dark: "donker", on_at: "aan om {t}", full: "vol licht", rising: "opkomst", falling: "afbouw",
+    day_starts: "Dag begint om", not_set: "niet ingesteld", shift_to: "Verschuif naar {h}",
+    photoperiod: "Fotoperiode", no_dark: "geen donkere periode", h: "u",
+    moon: "Maan", rises: "op", sets: "onder",
+    moon_now: "maanlicht nu {p}%", moon_on: "maanlicht aan (tot {p}%)", moon_off: "maanlicht uit",
+    align: "Geladen profielen uitlijnen", channels: "Kanalen", linked: "Samen bewegen",
+    slot_dark: "donker", slot_today: "vandaag {p}%",
+    load: "Schema laden…", cur_lamp: "Huidig lampschema", saved: "Opgeslagen profielen", presets: "Presets (bitbarista)",
+    community: "(community)", legacy: "Origineel (oud, lamp onbekend)",
+    save_as: "Opslaan als…", delete: "Verwijderen", really_delete: "\"{n}\" echt verwijderen?",
+    import: "QR importeren", export: "QR tonen", sync: "Klok gelijkzetten", acclimate: "Acclimatiseren…", moonlight: "Maanlicht…",
+    revert: "Herstel", update_target: "Doel bijwerken", apply_lamp: "Naar lamp sturen",
+    no_changes: "Geen wijzigingen", unsaved: "Niet toegepaste wijzigingen", update_pending: "Update staat klaar",
+    cancel: "Annuleren", close: "Sluiten",
+    confirm_acc: "Dit wordt het nieuwe acclimatisatiedoel. De lamp krijgt het meteen op <b>{p}%</b> van vandaag en loopt daarna dagelijks op.",
+    confirm_lamp: "Dit overschrijft het opgeslagen schema van de lamp en zet hem in <b>auto</b> met de huidige tijd.",
+    confirm_pause: "De lamp hapert een paar seconden en begint opnieuw.", write: "Naar lamp schrijven",
+    acc_intro: "Loop lineair op naar het <b>schema in de editor</b> (het volle doel). De stap van vandaag wordt nu geschreven; daarna {w}.",
+    acc_intro_w: "begint de dagelijkse update om {t}, in de donkere periode van het doel",
+    acc_intro_nw: "zijn automatische updates alleen mogelijk met een donkere periode in het doel",
+    start_at: "Begin op", over: "in", days: "dagen", start_acc: "Acclimatisatie starten",
+    moon_intro: "Nachtlicht dat de echte maan boven je huis volgt: de helderheid gaat mee met de verlichte maan. {w} Overdag wordt nooit gedimd; het maanniveau telt alleen waar het feller is dan je schema.",
+    moon_intro_w: "De dagelijkse update begint om {t}, in de donkere periode van het doel.",
+    moon_intro_nw: "Automatische updates staan stil tot het doel een donkere periode heeft.",
+    moon_enabled: "Maanlicht aan", moon_level: "Niveau bij volle maan", moon_follow: "Alleen als de maan op is",
+    moon_share: "Aandeel van het maanniveau per kanaal (0 = uit):", moon_save: "Maanlicht opslaan",
+    stop_q: "Acclimatisatie nu stoppen?", keep_conf: "Bevestigde {p} houden", go_full: "Naar het volle schema",
+    profile_name: "Naam van het profiel", save: "Opslaan",
+    import_intro: "Plak de QR-tekst, kies een screenshot of foto van de QR-code, of scan hem met de camera.",
+    image: "Afbeelding…", camera: "Camera", stop_camera: "Camera stoppen", load_text: "Tekst laden", copy: "Tekst kopiëren",
+    m_day_cleared: "Dagstart gewist.", m_day_is: "De dag begint om {h}.", m_day_shift: "Concept verschoven naar start om {h}. Stuur het naar de lamp om het toe te passen.",
+    m_loaded_lamp: "Huidig schema geladen.", m_loaded: "In het concept geladen.{n} Er verandert pas iets aan de lamp als je het toepast.",
+    m_writing: "Schema naar de lamp schrijven…", m_acc_updated: "Acclimatisatiedoel bijgewerkt.",
+    m_written: "Schema geschreven. De lamp staat op auto.", m_same: "De lamp had dit schema al; niets geschreven.",
+    m_reset_acc: "Concept teruggezet naar het acclimatisatiedoel.", m_reset_lamp: "Concept teruggezet naar het lampschema.",
+    m_moon_range: "Niveau bij volle maan moet 1–50% zijn.", m_moon_saving: "Maanlicht opslaan…",
+    m_moon_saved: "Maanlicht opgeslagen; de lamp heeft de maan van vannacht.", m_moon_off: "Maanlicht uit.",
+    m_shifted: "Concept verschoven.{n} Stuur het naar de lamp om het toe te passen.",
+    m_acc_range: "Begin moet 1–99% zijn en de duur 1–120 dagen.", m_acc_starting: "Acclimatisatie starten…",
+    m_acc_started: "Acclimatisatie gestart op {s}% over {d} dagen.",
+    m_acc_kept: "Acclimatisatie gestopt; de lamp houdt het verlaagde schema.", m_acc_full: "Acclimatisatie gestopt; volle schema geschreven.",
+    m_synced: "Klok van de lamp gelijkgezet met Home Assistant.", m_saved: "Profiel \"{n}\" opgeslagen.", m_deleted: "Profiel \"{n}\" verwijderd.",
+    m_copied: "QR-tekst gekopieerd.", m_qr_loaded: "QR-code in het concept geladen.{n} Controleer het en pas het toe.",
+    m_no_qr: "Geen QR-code gevonden in die afbeelding. Probeer een scherpere of kleinere uitsnede.",
+    m_no_camera: "Camera niet beschikbaar (vereist HTTPS). Gebruik een afbeelding.",
+    m_aligned: " {d} u verschoven naar start om {h}.",
+  },
+};
 
 const loaded = {};
 function loadScript(path, globalName) {
@@ -23,9 +150,6 @@ function loadScript(path, globalName) {
   }
   return loaded[path];
 }
-const loadChart = () =>
-  loadScript("vendor/chart.umd.min.js", "Chart").then(() =>
-    loadScript("vendor/chartjs-plugin-dragdata.min.js", "ChartJSdragDataPlugin"));
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const clamp = (v) => Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
@@ -78,7 +202,8 @@ function alignDayStart(schedule, hour) {
   const cur = dayStart(schedule);
   return cur === null ? clone(schedule) : shiftRows(schedule, hour - cur);
 }
-const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—");
+const fmtTime = (iso, locale) => (iso ? new Date(iso).toLocaleTimeString(locale || [], { hour: "2-digit", minute: "2-digit" }) : "—");
+const fmtDate = (day, locale) => { const d = new Date(`${day}T12:00:00`); return isNaN(d) ? day : d.toLocaleDateString(locale || [], { day: "numeric", month: "short" }); };
 
 // The lamp runs on HA's local time, so "now" uses HA's time zone rather than the browser's.
 function nowHours(timeZone, date = new Date()) {
@@ -120,6 +245,67 @@ function blend(levels) {
   return `rgb(${rgb.map((c) => Math.round(c * scale)).join(",")})`;
 }
 
+const MOON_NL = { "New moon": "Nieuwe maan", "Waxing crescent": "Wassende sikkel", "First quarter": "Eerste kwartier",
+  "Waxing gibbous": "Wassende maan", "Full moon": "Volle maan", "Waning gibbous": "Afnemende maan",
+  "Last quarter": "Laatste kwartier", "Waning crescent": "Afnemende sikkel" };
+const CHANNEL_NL = { White: "Wit", "Royal Blue": "Royal blue", Green: "Groen", UV: "UV", Cyan: "Cyaan", Red: "Rood" };
+
+// Channel levels at `hours`, interpolated between the active rows the way the lamp ramps, wrapping over midnight.
+function levelsAt(rows, hours) {
+  const act = activeRows(rows || []);
+  if (!act.length) return Array(rows?.[0] ? rows[0].length - 2 : 6).fill(0);
+  if (act.length === 1) return act[0].slice(2);
+  const t = act.map((r) => r[0] + r[1] / 60);
+  let i = -1;
+  t.forEach((x, k) => { if (x <= hours) i = k; });
+  const prev = i >= 0 ? i : act.length - 1;
+  const next = (prev + 1) % act.length;
+  const t0 = i >= 0 ? t[prev] : t[prev] - 24;
+  const t1 = t[next] > t0 ? t[next] : t[next] + 24;
+  const f = (hours - t0) / (t1 - t0);
+  return act[prev].slice(2).map((v, c) => v + (act[next][c + 2] - v) * f);
+}
+// Sample points for the chart: midnight at both ends plus every row time of the given schedules.
+function sampleTimes(lists) {
+  const set = new Set([0, 24]);
+  lists.forEach((rows) => activeRows(rows || []).forEach((r) => set.add(r[0] + r[1] / 60)));
+  return [...set].sort((a, b) => a - b);
+}
+// Monotone cubic curve through the points (Fritsch-Carlson): smooth, but never above or below the real values.
+function mono(pts) {
+  const n = pts.length;
+  if (n < 2) return "";
+  const dx = [], m = [], t = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = pts[i + 1][0] - pts[i][0]; m[i] = (pts[i + 1][1] - pts[i][1]) / dx[i]; }
+  t[0] = m[0]; t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2;
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; }
+    const a = t[i] / m[i], b = t[i + 1] / m[i], q = a * a + b * b;
+    if (q > 9) { const k = 3 / Math.sqrt(q); t[i] = k * a * m[i]; t[i + 1] = k * b * m[i]; }
+  }
+  let d = "";
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i] / 3;
+    d += `C${(pts[i][0] + h).toFixed(1)},${(pts[i][1] + t[i] * h).toFixed(1)} ${(pts[i + 1][0] - h).toFixed(1)},${(pts[i + 1][1] - t[i + 1] * h).toFixed(1)} ${pts[i + 1][0].toFixed(1)},${pts[i + 1][1].toFixed(1)}`;
+  }
+  return d;
+}
+// Strip cell: hue of the mix, more opaque as the light gets stronger.
+function cellColor(levels) {
+  const c = lightColor(levels);
+  if (!c) return "";
+  const a = 0.22 + 0.78 * Math.min(1, Math.max(...levels) / 50);
+  return c.replace("rgb(", "rgba(").replace(")", `,${a.toFixed(2)})`);
+}
+// Hue of the mixed light at full brightness, or null when everything is off.
+function lightColor(levels) {
+  const rgb = [0, 0, 0];
+  levels.forEach((v, i) => hexToRgb(COLORS[i] || "#ffffff").forEach((c, k) => (rgb[k] += c * v)));
+  const peak = Math.max(...rgb);
+  return peak ? `rgb(${rgb.map((c) => Math.round((c / peak) * 255)).join(",")})` : null;
+}
+
 class K7ScheduleCard extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
@@ -154,11 +340,14 @@ class K7ScheduleCard extends HTMLElement {
         }
       }).catch(() => {});
     }
-    // Move the "now" line once a minute without rebuilding the card.
+    // Follow a theme switch; otherwise move the "now" marker once a minute without rebuilding the card.
+    if (this._draft && this._darkSeen !== undefined && this._dark() !== this._darkSeen) return this._render();
     const minute = Math.floor(Date.now() / 60000);
-    if (this._chart && minute !== this._nowMinute) {
+    if (this._draft && minute !== this._nowMinute) {
       this._nowMinute = minute;
-      this._chart.draw();
+      this._drawChart();
+      const now = this.shadowRoot?.querySelector(".now");
+      if (now) now.innerHTML = this._nowText();
     }
   }
 
@@ -179,13 +368,14 @@ class K7ScheduleCard extends HTMLElement {
     this._channels = ["White", "Royal Blue", "Green", "UV", "Cyan", "Red"];
     this._visible = this._channels.map(() => true);
     this._linked = false;
+    this._view = "draft"; // or "lamp": what the lamp runs (today's acclimation step, moonlight)
     this._slot = 12;
     this._cameraRequest = 0;
     this._panel = null; // "import" | "export" | "save" | "confirm"
     this._msg = null;
     this._render();
     try {
-      await Promise.all([loadChart(), this._refresh(), this._loadPresets()]);
+      await Promise.all([this._refresh(), this._loadPresets()]);
       this._draft = clone(this._baseline());
       this._slot = slotAt(this._draft.schedule, this._now());
       this._render();
@@ -241,7 +431,7 @@ class K7ScheduleCard extends HTMLElement {
     if (cur === null || cur === want) return { schedule, note: "" };
     const diff = Math.round((((want - cur + 36) % 24) - 12) * 100) / 100;
     return { schedule: alignDayStart(schedule, want),
-             note: ` Shifted ${diff > 0 ? "+" : ""}${diff} h to start at ${pad(want)}:00.` };
+             note: this._t("m_aligned", { d: `${diff > 0 ? "+" : ""}${diff}`, h: `${pad(want)}:00` }) };
   }
 
   _dirty() {
@@ -269,30 +459,71 @@ class K7ScheduleCard extends HTMLElement {
 
   // ---------- rendering ----------
 
+  _lang() {
+    return String(this._hass?.locale?.language || this._hass?.language || "en").startsWith("nl") ? "nl" : "en";
+  }
+
+  _locale() {
+    return this._hass?.locale?.language || this._hass?.language || undefined;
+  }
+
+  _t(key, vars = {}) {
+    const s = STRINGS[this._lang()][key] ?? STRINGS.en[key] ?? key;
+    return s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? ""));
+  }
+
+  _chName(i) {
+    const name = this._channels[i];
+    return this._lang() === "nl" ? (CHANNEL_NL[name] || name) : name;
+  }
+
+  _dark() {
+    return this._hass?.themes?.darkMode !== false;
+  }
+
+  _colors() {
+    return CHANNEL_COLORS[this._dark() ? "dark" : "light"];
+  }
+
+  _stack() {
+    return this._channels.length === 6 ? STACK : this._channels.map((_, i) => i);
+  }
+
+  // The chart can show the draft or what the lamp runs (today's acclimation step, moonlight).
+  _segShown() {
+    return !!this._lamp?.schedule && (!!this._lamp.program || this._dirty());
+  }
+
+  _viewRows() {
+    return this._segShown() && this._view === "lamp" ? this._lamp.schedule : this._draft.schedule;
+  }
+
   _render() {
     const root = this.shadowRoot;
     if (!root) return;
     const ready = !!this._draft;
     const lamp = this._lamp;
+    this._darkSeen = this._dark();
     root.innerHTML = `
       <style>${STYLE}</style>
-      <ha-card>
+      <ha-card class="${this._dark() ? "dark" : "light"}">
         <div class="head">
-          <div class="title">${esc(this._config.title || lamp?.title || "K7 schedule")}</div>
-          ${lamp ? `<span class="chip ${lamp.available ? "" : "bad"}">${lamp.available ? (lamp.auto ? "Auto" : "Manual") : "Offline"}</span>` : ""}
-          ${ready ? `<span class="chip ${this._dirty() ? "warn" : "ok"}">${this._dirty()
-            ? (this._acc() ? "Draft differs from target" : "Draft differs from lamp")
-            : (this._lamp?.program ? "Matches target" : "Matches lamp")}</span>` : ""}
+          <div class="title">${esc(this._config.title || lamp?.title || this._t("title"))}</div>
+          ${lamp ? `<span class="pill ${lamp.available ? "" : "bad"}"><i></i>${lamp.available ? this._t(lamp.auto ? "auto" : "manual") : this._t("offline")}</span>` : ""}
+          ${ready ? `<span class="pill ${this._dirty() ? "warn" : "ok"}"><i></i>${this._dirty()
+            ? this._t(this._acc() ? "differs_target" : "differs_lamp")
+            : this._t(this._lamp?.program ? "matches_target" : "matches_lamp")}</span>` : ""}
         </div>
-        ${this._msg ? `<div class="msg ${this._msg.kind}">${esc(this._msg.text)}<button class="x" data-act="dismiss">×</button></div>` : ""}
-        ${lamp?.program_error ? `<div class="msg error">${esc(lamp.program_error)}</div>` : ""}
-        ${lamp?.pending ? `<div class="msg">A plan update is pending. It will retry in the next safe window, or you can Apply now.</div>` : ""}
+        ${this._msg ? `<div class="msg ${this._msg.kind}"><span>${esc(this._msg.text)}</span><button class="x" data-act="dismiss" aria-label="${this._t("close")}">×</button></div>` : ""}
+        ${lamp?.program_error ? `<div class="msg error"><span>${esc(lamp.program_error)}</span></div>` : ""}
+        ${lamp?.pending ? `<div class="msg"><span>${this._t("pending")}</span></div>` : ""}
         ${ready && this._acc() ? this._accBanner() : ""}
-        ${ready ? this._body() : `<div class="loading">Loading…</div>`}
+        ${ready ? this._body() : `<div class="loading">${this._t("loading")}</div>`}
       </ha-card>`;
     if (ready) {
       this._bind();
       this._drawChart();
+      this._observe();
     } else {
       root.querySelector("[data-act=dismiss]")?.addEventListener("click", () => {
         this._msg = null;
@@ -304,170 +535,201 @@ class K7ScheduleCard extends HTMLElement {
   _accBanner() {
     const a = this._acc();
     const pct = Math.max(0, Math.min(100, a.percent));
+    const confirmed = a.applied_percent == null ? this._t("unknown") : `${a.applied_percent}%`;
     return `<div class="acc">
-      <div class="acctext"><b>Acclimation</b> · day ${a.day} of ${a.days} · <b>${a.percent}%</b>
-        <span class="muted">(${a.start_percent}% → 100%, ends ${esc(a.ends)})</span></div>
-      <div class="bar"><div style="width:${pct}%"></div></div>
-      <div class="muted small">The chart shows the full target. Planned today: ${a.percent}%. Last confirmed: ${a.applied_percent == null ? "unknown" : `${a.applied_percent}%`}.
-      ${this._lamp.rebuild_time ? `Daily update window starts at ${this._lamp.rebuild_time}.` : "No safe dark interval; automatic updates are paused."}</div>
-      <button data-act="acc-stop">Stop…</button></div>`;
+      <div class="t">${this._t("acc")} <span>· ${this._t("acc_day", { d: a.day, n: a.days })} ·</span> <em>${a.percent}%</em></div>
+      <div class="progress"><b style="width:${pct}%"></b></div>
+      <div class="s">${this._t("acc_range", { s: a.start_percent, e: esc(fmtDate(a.ends, this._locale())) })} · ${this._t("acc_confirmed", { p: confirmed })}
+        ${this._lamp.rebuild_time ? this._t("acc_window", { t: this._lamp.rebuild_time }) : this._t("acc_nowindow")}</div>
+      <button class="btn tint" data-act="acc-stop">${this._t("stop")}</button></div>`;
   }
 
-  _dayStartRow() {
+  _settings() {
     const period = photoperiod(this._draft.schedule);
     const pref = this._lamp.day_start;
     const cur = period ? period[0] : null;
-    const opts = [`<option value="" ${pref == null ? "selected" : ""}>not set</option>`]
+    const opts = [`<option value="" ${pref == null ? "selected" : ""}>${this._t("not_set")}</option>`]
       .concat(Array.from({ length: 24 }, (_, h) =>
         `<option value="${h}" ${pref === h ? "selected" : ""}>${pad(h)}:00</option>`)).join("");
     const len = period ? ((period[1] - period[0] + 24) % 24 || 24) : 0;
-    return `<div class="row daystart">
-      <label>Day starts at <select data-act="daystart" ${cur === null ? "disabled" : ""}>${opts}</select></label>
-      <span class="muted">${period ? `photoperiod ${fmtHour(period[0])}–${fmtHour(period[1])} (${Math.round(len * 100) / 100} h)` : "no dark period to shift"}</span>
-      ${pref != null && cur !== null && cur !== pref ? `<button data-act="align">Shift to ${pad(pref)}:00</button>` : ""}
-      <label class="tog"><input type="checkbox" data-act="keeptimes" ${this._keepTimes ? "" : "checked"}>Align loaded profiles</label>
-      <span class="grow"></span>
-      ${this._lamp.program ? `<label class="tog"><input type="checkbox" data-act="showlamp" ${this._showLamp ? "checked" : ""}>Show what the lamp runs</label>` : ""}
+    const m = this._lamp.moon;
+    let moon = "";
+    if (m) {
+      const cfg = m.config;
+      const status = cfg.enabled
+        ? (m.level_now > 0 ? this._t("moon_now", { p: m.level_now }) : this._t("moon_on", { p: cfg.max_level }))
+        : this._t("moon_off");
+      moon = `<div class="item"><span class="lbl">${this._t("moon")}</span><span class="val">${m.icon} ${esc(this._lang() === "nl" ? (MOON_NL[m.phase_name] || m.phase_name) : m.phase_name)} · ${m.illumination}% ·
+        ${this._t("rises")} ${fmtTime(m.next_rise, this._locale())} · ${this._t("sets")} ${fmtTime(m.next_set, this._locale())} · ${status}</span></div>`;
+    }
+    return `<div class="group">
+      <div class="item"><span class="lbl">${this._t("day_starts")}</span>
+        ${pref != null && cur !== null && cur !== pref ? `<button class="btn small" data-act="align">${this._t("shift_to", { h: `${pad(pref)}:00` })}</button>` : ""}
+        <select class="ios" data-act="daystart" ${cur === null ? "disabled" : ""}>${opts}</select></div>
+      <div class="item"><span class="lbl">${this._t("photoperiod")}</span><span class="val">${period
+        ? `${fmtHour(period[0])} – ${fmtHour(period[1])} · ${Math.round(len * 100) / 100} ${this._t("h")}` : this._t("no_dark")}</span></div>
+      ${moon}
+      <div class="item"><span class="lbl">${this._t("align")}</span>
+        <label class="sw"><input type="checkbox" data-act="keeptimes" ${this._keepTimes ? "" : "checked"}><b></b></label></div>
     </div>`;
   }
 
-  _moonLine() {
-    const m = this._lamp.moon;
-    if (!m) return "";
-    const cfg = m.config;
-    const status = cfg.enabled
-      ? (m.level_now > 0 ? `moonlight now ${m.level_now}%` : `moonlight on (up to ${cfg.max_level}%)`)
-      : "moonlight off";
-    return `<div class="moonline muted">${m.icon} ${esc(m.phase_name)} · ${m.illumination}% lit ·
-      rises ${fmtTime(m.next_rise)} · sets ${fmtTime(m.next_set)} · <b>${status}</b></div>`;
+  // "Now 14:10 · full light" for the series the chart shows.
+  _nowText() {
+    const rows = this._viewRows();
+    const now = this._now();
+    const sum = (lv) => lv.reduce((a, v, i) => a + (this._visible[i] ? v : 0), 0);
+    const total = sum(levelsAt(rows, now));
+    const head = `<b>${this._t("now")} ${fmtHour(now)}</b>`;
+    if (total < 0.5) {
+      const p = photoperiod(rows);
+      return `${head} · ${this._t("dark")}${p ? ` · ${this._t("on_at", { t: fmtHour(p[0]) })}` : ""}`;
+    }
+    const peak = Math.max(...sampleTimes([rows]).map((x) => sum(levelsAt(rows, x))));
+    const pct = peak ? total / peak : 1;
+    if (pct >= 0.99) return `${head} · ${this._t("full")}`;
+    const later = sum(levelsAt(rows, now + 0.25));
+    return `${head} · ${this._t(later >= total ? "rising" : "falling")} ${Math.round(pct * 100)}%`;
   }
 
   _body() {
     const d = this._draft;
+    const cols = this._colors();
     const nowSlot = slotAt(d.schedule, this._now());
+    const sel = this._slotIndex();
     const strip = d.schedule
-      .map((r, i) => `<div class="cell ${i === this._slotIndex() ? "sel" : ""} ${i === nowSlot ? "now" : ""}" data-slot="${i}"
-          style="background:${blend(r.slice(2))}" title="${pad(r[0])}:${pad(r[1])}${i === nowSlot ? " (now)" : ""}"><span>${pad(r[0])}</span></div>`)
+      .map((r, i) => `<button class="cell ${i === sel ? "sel" : ""} ${i === nowSlot ? "now" : ""}" data-slot="${i}"
+          style="${lit(r) ? `background:${cellColor(r.slice(2))}` : ""}" title="${pad(r[0])}:${pad(r[1])}"><span>${pad(r[0])}</span></button>`)
       .join("");
-    const toggles = this._channels
-      .map((c, i) => `<label class="tog"><input type="checkbox" data-ch="${i}" ${this._visible[i] ? "checked" : ""}>
-          <i style="background:${COLORS[i]}"></i>${esc(c)}</label>`)
+    const chips = this._channels
+      .map((c, i) => `<button class="chan ${this._visible[i] ? "" : "off"}" data-ch="${i}" aria-pressed="${this._visible[i]}"
+          style="--c:${cols[i]}"><i></i>${esc(this._chName(i))}</button>`)
       .join("");
-    const row = d.schedule[this._slotIndex()];
+    const row = d.schedule[sel];
+    const total = row.slice(2).reduce((a, b) => a + b, 0);
+    const acc = this._acc();
     const sliders = this._channels
-      .map((c, i) => `<div class="sl"><span class="lbl"><i style="background:${COLORS[i]}"></i>${esc(c)}</span>
-          <input type="range" min="0" max="100" value="${row[i + 2]}" data-lv="${i}">
-          <input type="number" min="0" max="100" value="${row[i + 2]}" data-num="${i}"></div>`)
+      .map((c, i) => `<div class="sl"><span class="n ${this._visible[i] ? "" : "off"}" style="--c:${cols[i]}"><i></i>${esc(this._chName(i))}</span>
+          <input type="range" min="0" max="100" value="${row[i + 2]}" data-lv="${i}" style="--c:${cols[i]};--p:${row[i + 2]}%">
+          <input class="num" type="number" min="0" max="100" value="${row[i + 2]}" data-num="${i}"></div>`)
       .join("");
     const profileOpts = Object.keys(this._profiles || {})
-      .map((n) => `<option value="p:${esc(n)}">${esc(n === "Original (from lamp)" ? "Original (legacy, lamp unknown)" : n)}</option>`)
+      .map((n) => `<option value="p:${esc(n)}" ${this._source === `p:${n}` ? "selected" : ""}>${esc(n === "Original (from lamp)" ? this._t("legacy") : n)}</option>`)
       .join("");
     const presetOpts = (this._presets || [])
-      .map((p, i) => `<option value="b:${i}">${esc(p.name)}${p.source === "community" ? " (community)" : ""}</option>`)
+      .map((p, i) => `<option value="b:${i}">${esc(p.name)}${p.source === "community" ? ` ${this._t("community")}` : ""}</option>`)
       .join("");
+    const seg = this._segShown()
+      ? `<div class="seg" role="tablist">
+          <button data-act="view-draft" class="${this._view !== "lamp" ? "on" : ""}">${this._t(this._lamp.program ? "seg_target" : "seg_draft")}</button>
+          <button data-act="view-lamp" class="${this._view === "lamp" ? "on" : ""}">${this._t(acc ? "seg_today" : "seg_lamp")}${acc ? `<span>${acc.percent}%</span>` : ""}</button>
+        </div>` : "";
+    const canApply = (this._dirty() || this._lamp.pending) && this._lamp.available;
     return `
-      <div class="chartwrap"><canvas></canvas></div>
-      <div class="strip">${strip}</div>
-      ${this._dayStartRow()}
-      ${this._moonLine()}
-      <div class="row toggles">${toggles}
-        <label class="tog link"><input type="checkbox" data-act="link" ${this._linked ? "checked" : ""}>Move channels together</label>
-      </div>
+      <div class="charthead"><div class="now">${this._nowText()}</div>
+        ${seg ? `<span class="legend"><i></i>${this._t(this._view === "lamp" ? (this._lamp.program ? "seg_target" : "seg_draft") : (acc ? "seg_today" : "seg_lamp"))}</span>` : ""}${seg}</div>
+      <div class="chart"><svg aria-hidden="true"></svg><div class="tip"></div></div>
+      <div class="strip" style="grid-template-columns:repeat(${d.schedule.length},1fr)">${strip}</div>
+      ${this._settings()}
+      <div class="sec"><b>${this._t("channels")}</b>
+        <label class="link">${this._t("linked")}<span class="sw sm"><input type="checkbox" data-act="link" ${this._linked ? "checked" : ""}><b></b></span></label></div>
+      <div class="chans">${chips}</div>
       <div class="slot">
-        <div class="slothead">Slot ${pad(row[0])}:${pad(row[1])}
-          <button data-act="prev">‹</button><button data-act="next">›</button></div>
+        <div class="top"><h3>${pad(row[0])}:${pad(row[1])}</h3>
+          <span class="s">${total ? `Σ ${total}%${acc ? ` · ${this._t("slot_today", { p: Math.round(total * acc.percent / 100) })}` : ""}` : this._t("slot_dark")}</span>
+          <div class="nav"><button class="btn sq" data-act="prev" aria-label="‹">‹</button><button class="btn sq" data-act="next" aria-label="›">›</button></div></div>
         ${sliders}
       </div>
-      <div class="row">
-        <select data-act="pick">
-          <option value="">Load a schedule…</option>
-          <option value="lamp">Current lamp schedule</option>
+      <div class="prof">
+        <select class="ios" data-act="pick">
+          <option value="">${this._t("load")}</option>
+          <option value="lamp">${this._t("cur_lamp")}</option>
           ${this._lamp.original ? `<option value="original">${esc(this._lamp.original.name)}</option>` : ""}
-          ${profileOpts ? `<optgroup label="Saved profiles">${profileOpts}</optgroup>` : ""}
-          ${presetOpts ? `<optgroup label="Presets (bitbarista)">${presetOpts}</optgroup>` : ""}
+          ${profileOpts ? `<optgroup label="${this._t("saved")}">${profileOpts}</optgroup>` : ""}
+          ${presetOpts ? `<optgroup label="${this._t("presets")}">${presetOpts}</optgroup>` : ""}
         </select>
-        <button data-act="save">Save as…</button>
-        <button data-act="delete" ${this._selectedProfile() ? "" : "disabled"}>Delete profile</button>
-      </div>
-      <div class="row">
-        <button data-act="import">Import QR</button>
-        <button data-act="export">Show QR</button>
-        <button data-act="sync">Sync clock</button>
-        <button data-act="acc" ${this._acc() ? "disabled" : ""}>Acclimate…</button>
-        <button data-act="moon">Moonlight…</button>
         <span class="grow"></span>
-        <button data-act="revert" ${this._dirty() ? "" : "disabled"}>Revert</button>
-        <button class="primary" data-act="apply" ${(this._dirty() || this._lamp.pending) && this._lamp.available ? "" : "disabled"}>${this._lamp.program ? "Update target" : "Apply to lamp"}</button>
+        <button class="btn" data-act="save">${this._t("save_as")}</button>
+        <button class="btn ghost" data-act="delete" ${this._selectedProfile() ? "" : "disabled"}>${this._t("delete")}</button>
       </div>
-      ${this._panelHtml()}`;
+      <div class="foot">
+        <button class="btn" data-act="import">${this._t("import")}</button>
+        <button class="btn" data-act="export">${this._t("export")}</button>
+        <button class="btn" data-act="sync">${this._t("sync")}</button>
+        <button class="btn" data-act="acc" ${acc ? "disabled" : ""}>${this._t("acclimate")}</button>
+        <button class="btn" data-act="moon">${this._t("moonlight")}</button>
+      </div>
+      ${this._panelHtml()}
+      <div class="applyrow">
+        <span class="hint">${this._t(this._dirty() ? "unsaved" : this._lamp.pending ? "update_pending" : "no_changes")}</span>
+        <button class="btn ghost" data-act="revert" ${this._dirty() ? "" : "disabled"}>${this._t("revert")}</button>
+        <button class="btn primary" data-act="apply" ${canApply ? "" : "disabled"}>${this._lamp.program ? this._t("update_target") : this._t("apply_lamp")}</button>
+      </div>`;
   }
 
   _panelHtml() {
+    const cols = this._colors();
     switch (this._panel) {
       case "confirm":
         return `<div class="panel">
-          <p>${this._acc()
-            ? `This becomes the new acclimation target. The lamp gets it right away at today's <b>${this._acc().percent}%</b>, then rises daily as planned.`
-            : "This rewrites the lamp's stored schedule and puts it in <b>auto</b> mode with the current time."}
-          The lamp pauses for a few seconds and its output resets.</p>
-          <div class="row"><span class="grow"></span><button data-act="cancel">Cancel</button>
-          <button class="primary" data-act="apply-yes">Write to lamp</button></div></div>`;
+          <p>${this._acc() ? this._t("confirm_acc", { p: this._acc().percent }) : this._t("confirm_lamp")} ${this._t("confirm_pause")}</p>
+          <div class="row"><span class="grow"></span><button class="btn" data-act="cancel">${this._t("cancel")}</button>
+          <button class="btn primary" data-act="apply-yes">${this._t("write")}</button></div></div>`;
       case "acc":
         return `<div class="panel">
-          <p>Ramp up linearly to the <b>schedule in the editor</b> (the full target). Today's step is written
-          now; after that ${this._lamp.rebuild_time ? `the daily update window starts at ${this._lamp.rebuild_time}, in the target's dark interval` : "automatic updates require a dark interval in the target schedule"}.</p>
+          <p>${this._t("acc_intro", { w: this._lamp.rebuild_time ? this._t("acc_intro_w", { t: this._lamp.rebuild_time }) : this._t("acc_intro_nw") })}</p>
           <div class="row">
-            <label>Start at <input type="number" min="1" max="99" value="50" data-act="acc-start"> %</label>
-            <label>over <input type="number" min="1" max="120" value="30" data-act="acc-days"> days</label>
+            <label>${this._t("start_at")} <input class="field" type="number" min="1" max="99" value="50" data-act="acc-start"> %</label>
+            <label>${this._t("over")} <input class="field" type="number" min="1" max="120" value="30" data-act="acc-days"> ${this._t("days")}</label>
             <span class="grow"></span>
-            <button data-act="cancel">Cancel</button><button class="primary" data-act="acc-go">Start acclimation</button>
+            <button class="btn" data-act="cancel">${this._t("cancel")}</button><button class="btn primary" data-act="acc-go">${this._t("start_acc")}</button>
           </div></div>`;
       case "moon": {
         const cfg = this._lamp.moon?.config || {};
         const w = cfg.channels || {};
-        const chans = this._channels.map((c, i) => `<label class="mch"><i style="background:${COLORS[i]}"></i>${esc(c)}
-            <input type="number" min="0" max="100" value="${w[i] ?? w[String(i)] ?? 0}" data-moonch="${i}">%</label>`).join("");
+        const chans = this._channels.map((c, i) => `<label class="mch"><i style="--c:${cols[i]}"></i>${esc(this._chName(i))}
+            <input class="field" type="number" min="0" max="100" value="${w[i] ?? w[String(i)] ?? 0}" data-moonch="${i}">%</label>`).join("");
         return `<div class="panel">
-          <p>Night-time light that follows the real moon over your home: brightness tracks the moon's
-          illumination. ${this._lamp.rebuild_time ? `The daily update window starts at ${this._lamp.rebuild_time}, in the target's dark interval.` : "Automatic updates are paused until the target has a dark interval."} Daylight hours are never dimmed;
-          the moon level is only used where it's brighter than your schedule.</p>
+          <p>${this._t("moon_intro", { w: this._lamp.rebuild_time ? this._t("moon_intro_w", { t: this._lamp.rebuild_time }) : this._t("moon_intro_nw") })}</p>
           <div class="row">
-            <label class="tog"><input type="checkbox" data-moon="enabled" ${cfg.enabled ? "checked" : ""}>Moonlight on</label>
-            <label>Level at full moon <input type="number" min="1" max="50" value="${cfg.max_level ?? 15}" data-moon="max_level"> %</label>
-            <label class="tog"><input type="checkbox" data-moon="follow_moon" ${cfg.follow_moon !== false ? "checked" : ""}>Only while the moon is up</label>
+            <label class="tog"><span class="sw sm"><input type="checkbox" data-moon="enabled" ${cfg.enabled ? "checked" : ""}><b></b></span>${this._t("moon_enabled")}</label>
+            <label>${this._t("moon_level")} <input class="field" type="number" min="1" max="50" value="${cfg.max_level ?? 15}" data-moon="max_level"> %</label>
+            <label class="tog"><span class="sw sm"><input type="checkbox" data-moon="follow_moon" ${cfg.follow_moon !== false ? "checked" : ""}><b></b></span>${this._t("moon_follow")}</label>
           </div>
-          <div class="muted small">Share of the moon level per channel (0 = off):</div>
+          <div class="muted">${this._t("moon_share")}</div>
           <div class="row mchs">${chans}</div>
-          <div class="row"><span class="grow"></span><button data-act="cancel">Cancel</button>
-          <button class="primary" data-act="moon-save">Save moonlight</button></div></div>`;
+          <div class="row"><span class="grow"></span><button class="btn" data-act="cancel">${this._t("cancel")}</button>
+          <button class="btn primary" data-act="moon-save">${this._t("moon_save")}</button></div></div>`;
       }
-      case "acc-stop":
+      case "acc-stop": {
+        const kept = this._acc()?.applied_percent;
         return `<div class="panel">
-          <p>Stop the acclimation now?</p>
-          <div class="row"><span class="grow"></span><button data-act="cancel">Cancel</button>
-          <button data-act="acc-keep" ${this._acc()?.applied_percent == null ? "disabled" : ""}>Keep confirmed ${this._acc()?.applied_percent ?? "unknown"}%</button>
-          <button class="primary" data-act="acc-full">Go to the full schedule</button></div></div>`;
+          <p>${this._t("stop_q")}</p>
+          <div class="row"><span class="grow"></span><button class="btn" data-act="cancel">${this._t("cancel")}</button>
+          <button class="btn" data-act="acc-keep" ${kept == null ? "disabled" : ""}>${this._t("keep_conf", { p: kept == null ? this._t("unknown") : `${kept}%` })}</button>
+          <button class="btn primary" data-act="acc-full">${this._t("go_full")}</button></div></div>`;
+      }
       case "save":
         return `<div class="panel"><div class="row">
-          <input type="text" data-act="name" placeholder="Profile name" value="${esc(this._selectedProfile() || "")}">
-          <button data-act="cancel">Cancel</button><button class="primary" data-act="save-yes">Save</button></div></div>`;
+          <input class="field wide" type="text" data-act="name" placeholder="${this._t("profile_name")}" value="${esc(this._selectedProfile() || "")}">
+          <button class="btn" data-act="cancel">${this._t("cancel")}</button><button class="btn primary" data-act="save-yes">${this._t("save")}</button></div></div>`;
       case "import":
         return `<div class="panel">
-          <p>Paste the QR text, choose a screenshot or photo of the QR code, or scan it with the camera.</p>
+          <p>${this._t("import_intro")}</p>
           <textarea data-act="qrtext" rows="3" placeholder="323232323232#0000…"></textarea>
           <div class="row">
-            <label class="btn">Image…<input type="file" accept="image/*" data-act="qrfile" hidden></label>
-            <button data-act="camera">${this._stream ? "Stop camera" : "Camera"}</button>
+            <label class="btn">${this._t("image")}<input type="file" accept="image/*" data-act="qrfile" hidden></label>
+            <button class="btn" data-act="camera">${this._t(this._stream ? "stop_camera" : "camera")}</button>
             <span class="grow"></span>
-            <button data-act="cancel">Close</button><button class="primary" data-act="qrload">Load text</button>
+            <button class="btn" data-act="cancel">${this._t("close")}</button><button class="btn primary" data-act="qrload">${this._t("load_text")}</button>
           </div>
           <video playsinline muted ${this._stream ? "" : "hidden"}></video></div>`;
       case "export":
         return `<div class="panel">
           <div class="qr"></div>
           <textarea readonly rows="3">${esc(this._qrPayload || "")}</textarea>
-          <div class="row"><span class="grow"></span><button data-act="copy">Copy text</button>
-          <button data-act="cancel">Close</button></div></div>`;
+          <div class="row"><span class="grow"></span><button class="btn" data-act="copy">${this._t("copy")}</button>
+          <button class="btn" data-act="cancel">${this._t("close")}</button></div></div>`;
       default:
         return "";
     }
@@ -481,114 +743,159 @@ class K7ScheduleCard extends HTMLElement {
     return this._source?.startsWith("p:") ? this._source.slice(2) : null;
   }
 
-  _drawChart() {
-    const canvas = this.shadowRoot.querySelector("canvas");
-    if (!canvas || !window.Chart) return;
-    this._chart?.destroy();
-    const grid = getComputedStyle(this).getPropertyValue("--divider-color") || "#8884";
-    const text = getComputedStyle(this).getPropertyValue("--secondary-text-color") || "#888";
-    const nowLine = {
-      id: "k7NowLine",
-      afterDatasetsDraw: (chart) => {
-        const { ctx, chartArea, scales } = chart;
-        const x = scales.x.getPixelForValue(this._now());
-        if (!chartArea || x < chartArea.left || x > chartArea.right) return;
-        const accent = getComputedStyle(this).getPropertyValue("--primary-color").trim() || "#03a9f4";
-        ctx.save();
-        ctx.strokeStyle = accent;
-        ctx.fillStyle = accent;
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.moveTo(x, chartArea.top);
-        ctx.lineTo(x, chartArea.bottom);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.font = "10px sans-serif";
-        ctx.textAlign = x > chartArea.right - 30 ? "right" : "left";
-        ctx.fillText("now", x + (ctx.textAlign === "left" ? 4 : -4), chartArea.top + 10);
-        ctx.restore();
-      },
-    };
-    this._chart = new window.Chart(canvas, {
-      type: "line",
-      plugins: [nowLine],
-      data: {
-        datasets: this._channels.map((c, ch) => ({
-          label: c,
-          hidden: !this._visible[ch],
-          data: this._draft.schedule.map((r) => ({ x: r[0] + r[1] / 60, y: r.some((v) => v !== 0) ? r[ch + 2] : null })),
-          spanGaps: true,
-          borderColor: COLORS[ch],
-          backgroundColor: COLORS[ch],
-          borderWidth: 2,
-          pointRadius: 4,
-          pointHitRadius: 12,
-          tension: 0,
-        })).concat(this._showLamp && this._lamp.schedule ? this._channels.map((c, ch) => ({
-          label: `${c} (lamp)`,
-          hidden: !this._visible[ch],
-          data: this._lamp.schedule.map((r) => ({ x: r[0] + r[1] / 60, y: r.some((v) => v !== 0) ? r[ch + 2] : null })),
-          spanGaps: true,
-          borderColor: COLORS[ch],
-          borderDash: [5, 4],
-          borderWidth: 1.5,
-          pointRadius: 0,
-          dragData: false,
-          tension: 0,
-        })) : []),
-      },
-      options: {
-        animation: false,
-        maintainAspectRatio: false,
-        interaction: { mode: "nearest", intersect: true },
-        scales: {
-          x: { type: "linear", min: 0, max: 24, ticks: { stepSize: 2, color: text, callback: (v) => pad(v) }, grid: { color: grid } },
-          y: { min: 0, max: 100, ticks: { stepSize: 25, color: text, callback: (v) => `${v}%` }, grid: { color: grid } },
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { title: (it) => { const r = this._draft.schedule[it[0].dataIndex]; return `${pad(r[0])}:${pad(r[1])}`; } } },
-          dragData: {
-            round: 0,
-            dragX: false,
-            showTooltip: true,
-            onDragStart: (e, ds, idx) => {
-              this._dragFrom = this._draft.schedule[idx][ds + 2];
-            },
-            onDrag: (e, ds, idx, value) => {
-              const v = clamp(value.y ?? value);
-              if (this._linked) {
-                const delta = v - this._dragFrom;
-                this._chart.data.datasets.forEach((set, ch) => {
-                  if (ch < this._channels.length && ch !== ds && !set.hidden) set.data[idx].y = clamp(this._draft.schedule[idx][ch + 2] + delta);
-                });
-                this._chart.update("none");
-              }
-            },
-            onDragEnd: (e, ds, idx, value) => {
-              const v = clamp(value.y ?? value);
-              const row = this._draft.schedule[idx];
-              const delta = v - row[ds + 2];
-              row[ds + 2] = v;
-              if (this._linked) {
-                this._visible.forEach((vis, ch) => {
-                  if (vis && ch !== ds) row[ch + 2] = clamp(row[ch + 2] + delta);
-                });
-              }
-              this._slot = idx;
-              this._render();
-            },
-          },
-        },
-        onClick: (e, els) => {
-          if (els.length) {
-            this._slot = els[0].index;
-            this._render();
-          }
-        },
-      },
+  // [start, end) in hours for each row: until the next row in time, the last one until 24:00.
+  _spans(schedule) {
+    const t = schedule.map((r) => r[0] + r[1] / 60);
+    return t.map((x) => [x, t.filter((y) => y > x).reduce((a, b) => Math.min(a, b), 24)]);
+  }
+
+  // Redraw the chart when the card changes width (the SVG is drawn at its real size, not scaled).
+  _observe() {
+    const wrap = this.shadowRoot.querySelector(".chart");
+    if (!wrap || typeof ResizeObserver === "undefined") return;
+    this._ro?.disconnect();
+    this._ro = new ResizeObserver(() => {
+      if (Math.round(wrap.clientWidth) !== this._geo?.W) this._drawChart();
     });
+    this._ro.observe(wrap);
+  }
+
+  _switchView(view) {
+    if (view === this._view) return;
+    this._tween = { from: this._lastSamples, t0: performance.now() };
+    this._view = view;
+    this._render();
+  }
+
+  _drawChart() {
+    const root = this.shadowRoot;
+    const wrap = root?.querySelector(".chart");
+    const svg = wrap?.querySelector("svg");
+    if (!svg) return;
+    const W = Math.max(280, Math.round(wrap.clientWidth || 640));
+    const H = W < 500 ? 190 : 220;
+    const L = 2, R = 2, TOP = 26, BOT = 22;
+    const cols = this._colors();
+    const dark = this._dark();
+    const draft = this._draft.schedule;
+    const lampRows = this._lamp?.schedule;
+    const seg = this._segShown();
+    const shown = this._viewRows();
+    const other = seg ? (shown === draft ? lampRows : draft) : null;
+    const xs = sampleTimes([draft, lampRows].filter(Boolean));
+    let S = xs.map((x) => levelsAt(shown, x));
+    const tw = this._tween;
+    if (tw?.from?.length === S.length) {
+      const k = Math.min(1, (performance.now() - tw.t0) / 420);
+      const e = 1 - Math.pow(1 - k, 3);
+      const target = S;
+      S = target.map((lv, i) => lv.map((v, c) => tw.from[i][c] + (v - tw.from[i][c]) * e));
+      if (k < 1) requestAnimationFrame(() => this._drawChart());
+      else { this._tween = null; S = target; }
+    } else this._tween = null;
+    this._lastSamples = S;
+    const vis = this._visible;
+    const sum = (lv) => lv.reduce((a, v, i) => a + (vis[i] ? v : 0), 0);
+    const peak = Math.max(...[draft, shown].map((rows) => Math.max(...xs.map((x) => sum(levelsAt(rows, x))))));
+    const yMax = Math.max(20, Math.ceil((peak * 1.12) / 20) * 20);
+    const X = (h) => L + ((W - L - R) * h) / 24;
+    const Y = (v) => H - BOT - ((H - BOT - TOP) * v) / yMax;
+    const P = (x, y) => `${x.toFixed(1)},${y.toFixed(1)}`;
+    const line = (pts) => `M${P(...pts[0])}${mono(pts)}`;
+    this._geo = { W, H, L, R, TOP, BOT, yMax, shown };
+
+    // Ambient light: the mixed light colour of each moment, very soft, fading out upwards.
+    const amb = xs.map((x, i) => {
+      const c = lightColor(S[i]);
+      const a = c ? Math.min(dark ? 0.22 : 0.14, sum(S[i]) / 600) : 0;
+      return `<stop offset="${(x / 24).toFixed(4)}" stop-color="${c || "#000"}" stop-opacity="${a.toFixed(3)}"/>`;
+    }).join("");
+    const grads = this._stack().map((c) => `<linearGradient id="k7g${c}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="${cols[c]}" stop-opacity="${dark ? 0.95 : 0.9}"/>
+        <stop offset="1" stop-color="${cols[c]}" stop-opacity="${dark ? 0.35 : 0.3}"/></linearGradient>`).join("");
+
+    let base = S.map(() => 0);
+    const areas = [];
+    const edges = [];
+    let topEdge = null;
+    this._stack().forEach((c) => {
+      if (!vis[c]) return;
+      const up = S.map((lv, i) => base[i] + lv[c]);
+      if (S.some((lv) => lv[c] > 0)) {
+        const tp = xs.map((x, i) => [X(x), Y(up[i])]);
+        const bp = xs.map((x, i) => [X(x), Y(base[i])]).reverse();
+        areas.push(`<path d="${line(tp)}L${P(...bp[0])}${mono(bp)}Z" fill="url(#k7g${c})"/>`);
+        edges.push(`<path d="${line(tp)}" class="seam"/><path d="${line(tp)}" fill="none" stroke="${cols[c]}" stroke-width="1.2" transform="translate(0,1.2)"/>`);
+        topEdge = tp;
+      }
+      base = up;
+    });
+
+    const [a, b] = this._spans(draft)[this._slotIndex()];
+    const now = this._now();
+    const nx = X(now);
+    const ny = Y(sum(levelsAt(shown, now)));
+    let ghost = "";
+    if (other) {
+      const gp = xs.map((x) => [X(x), Y(sum(levelsAt(other, x)))]);
+      ghost = `<path d="${line(gp)}" class="ghost"/>`;
+    }
+    const ticks = (W < 500 ? [0, 6, 12, 18, 24] : [0, 3, 6, 9, 12, 15, 18, 21, 24])
+      .map((h) => `<text x="${X(h).toFixed(1)}" y="${H - 5}" class="tick" text-anchor="${h === 0 ? "start" : h === 24 ? "end" : "middle"}">${pad(h)}</text>`).join("");
+    const nowShown = now >= 0 && now <= 24;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.innerHTML = `
+      <defs>${grads}
+        <linearGradient id="k7amb" x1="0" y1="0" x2="1" y2="0">${amb}</linearGradient>
+        <linearGradient id="k7fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".6" stop-color="#fff" stop-opacity="1"/></linearGradient>
+        <mask id="k7mask" maskContentUnits="userSpaceOnUse"><rect x="0" y="0" width="${W}" height="${H}" fill="url(#k7fade)"/></mask>
+        <linearGradient id="k7now" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="accstop" stop-opacity=".9"/><stop offset="1" class="accstop" stop-opacity="0"/></linearGradient>
+        <filter id="k7glow" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="12"/></filter>
+      </defs>
+      <rect x="${L}" y="0" width="${W - L - R}" height="${H - BOT}" fill="url(#k7amb)" mask="url(#k7mask)"/>
+      <line x1="${L}" x2="${W - R}" y1="${Y(yMax / 2).toFixed(1)}" y2="${Y(yMax / 2).toFixed(1)}" class="grid"/>
+      <line x1="${L}" x2="${W - R}" y1="${Y(yMax).toFixed(1)}" y2="${Y(yMax).toFixed(1)}" class="grid"/>
+      <rect x="${X(a).toFixed(1)}" y="${TOP - 8}" width="${Math.max(2, X(b) - X(a)).toFixed(1)}" height="${H - BOT - TOP + 8}" rx="8" class="selband"/>
+      ${topEdge && dark ? `<path d="${line(topEdge)}" fill="none" stroke="#7aa2ff" stroke-width="10" filter="url(#k7glow)" opacity=".45"/>` : ""}
+      ${areas.join("")}${edges.join("")}
+      <line x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}" class="base"/>
+      ${ghost}${ticks}
+      ${nowShown ? `<rect x="${(nx - 0.75).toFixed(1)}" y="${TOP - 14}" width="1.5" height="${H - BOT - TOP + 14}" fill="url(#k7now)"/>
+        <circle cx="${nx.toFixed(1)}" cy="${ny.toFixed(1)}" r="9" class="nowhalo"/>
+        <circle cx="${nx.toFixed(1)}" cy="${ny.toFixed(1)}" r="4.5" class="nowdot"/>
+        <g transform="translate(${Math.max(L + 18, Math.min(W - R - 18, nx)).toFixed(1)},${TOP - 18})"><rect x="-18" y="-10" width="36" height="20" rx="10" class="nowpill"/>
+        <text y="4.5" text-anchor="middle" class="nowtxt">${this._t("now")}</text></g>` : ""}
+      <g class="scrub"></g>`;
+  }
+
+  // Hover/drag over the chart: a hairline, a dot per layer and the time + total in a pill.
+  _scrub(h) {
+    const g = this._geo;
+    const root = this.shadowRoot;
+    const layer = root.querySelector(".scrub");
+    const tip = root.querySelector(".tip");
+    if (!g || !layer || !tip) return;
+    if (h == null) {
+      layer.innerHTML = "";
+      tip.style.opacity = 0;
+      return;
+    }
+    const cols = this._colors();
+    const X = (x) => g.L + ((g.W - g.L - g.R) * x) / 24;
+    const Y = (v) => g.H - g.BOT - ((g.H - g.BOT - g.TOP) * v) / g.yMax;
+    const lv = levelsAt(g.shown, h);
+    let acc = 0;
+    let dots = "";
+    this._stack().forEach((c) => {
+      if (!this._visible[c]) return;
+      acc += lv[c];
+      if (lv[c] > 0.3) dots += `<circle cx="${X(h).toFixed(1)}" cy="${Y(acc).toFixed(1)}" r="3.5" fill="${cols[c]}" class="sdot"/>`;
+    });
+    layer.innerHTML = `<line x1="${X(h).toFixed(1)}" x2="${X(h).toFixed(1)}" y1="${g.TOP - 6}" y2="${g.H - g.BOT}" class="shair"/>${dots}`;
+    const total = Math.round(acc);
+    tip.innerHTML = `${fmtHour(h)}<span>${total ? `Σ ${total}%` : this._t("dark")}</span>`;
+    tip.style.left = `${(X(h) / g.W) * 100}%`;
+    tip.style.opacity = 1;
   }
 
   _bind() {
@@ -598,12 +905,30 @@ class K7ScheduleCard extends HTMLElement {
       this._slot = +e.currentTarget.dataset.slot;
       this._render();
     });
-    on("[data-ch]", "change", (e) => {
-      this._visible[+e.target.dataset.ch] = e.target.checked;
+    on("[data-ch]", "click", (e) => {
+      const ch = +e.currentTarget.dataset.ch;
+      this._visible[ch] = !this._visible[ch];
       this._render();
     });
-    on("[data-lv],[data-num]", "change", (e) => {
-      const ch = +(e.target.dataset.lv ?? e.target.dataset.num);
+    // Sliders update the chart live; the card re-renders once the value is committed.
+    on("[data-lv]", "input", (e) => {
+      const ch = +e.target.dataset.lv;
+      const v = clamp(e.target.value);
+      const row = this._draft.schedule[this._slotIndex()];
+      const delta = v - row[ch + 2];
+      row[ch + 2] = v;
+      if (this._linked) this._visible.forEach((vis, c) => { if (vis && c !== ch) row[c + 2] = clamp(row[c + 2] + delta); });
+      root.querySelectorAll("[data-lv]").forEach((s) => {
+        const c = +s.dataset.lv;
+        s.value = row[c + 2];
+        s.style.setProperty("--p", `${row[c + 2]}%`);
+      });
+      root.querySelectorAll("[data-num]").forEach((n) => (n.value = row[+n.dataset.num + 2]));
+      this._drawChart();
+    });
+    on("[data-lv]", "change", () => this._render());
+    on("[data-num]", "change", (e) => {
+      const ch = +e.target.dataset.num;
       const row = this._draft.schedule[this._slotIndex()];
       const v = clamp(e.target.value);
       const delta = v - row[ch + 2];
@@ -611,28 +936,37 @@ class K7ScheduleCard extends HTMLElement {
       if (this._linked) this._visible.forEach((vis, c) => { if (vis && c !== ch) row[c + 2] = clamp(row[c + 2] + delta); });
       this._render();
     });
-    on("[data-lv]", "input", (e) => {
-      const num = root.querySelector(`[data-num="${e.target.dataset.lv}"]`);
-      if (num) num.value = e.target.value;
-    });
     on("[data-act]", "click", (e) => this._action(e.currentTarget.dataset.act, e));
     on("[data-act=pick]", "change", (e) => this._pick(e.target.value));
     on("[data-act=link]", "change", (e) => (this._linked = e.target.checked));
     on("[data-act=keeptimes]", "change", (e) => { this._keepTimes = !e.target.checked; });
-    on("[data-act=showlamp]", "change", (e) => { this._showLamp = e.target.checked; this._render(); });
     on("[data-act=daystart]", "change", async (e) => {
       const hour = e.target.value === "" ? null : +e.target.value;
       try {
         const res = await this._ws({ type: "k7_lamp/set_day_start", entry_id: this._lamp.entry_id, hour });
         this._updateLamp(res);
-        if (hour === null) return this._info("Day start cleared.");
+        if (hour === null) return this._info(this._t("m_day_cleared"));
         const before = dayStart(this._draft.schedule);
         this._draft.schedule = alignDayStart(this._draft.schedule, hour);
-        this._info(before === hour ? `Day starts at ${pad(hour)}:00.` :
-          `Draft shifted to start at ${pad(hour)}:00. Apply to send it to the lamp.`);
+        this._info(this._t(before === hour ? "m_day_is" : "m_day_shift", { h: `${pad(hour)}:00` }));
       } catch (err) { this._error(err); }
     });
     on("[data-act=qrfile]", "change", (e) => this._qrFromFile(e.target.files?.[0]));
+    const chart = root.querySelector(".chart");
+    if (chart) {
+      const hourAt = (e) => {
+        const r = chart.getBoundingClientRect();
+        const g = this._geo || { W: r.width, L: 2, R: 2 };
+        const px = ((e.clientX - r.left) / r.width) * g.W;
+        return Math.max(0, Math.min(23.99, ((px - g.L) / (g.W - g.L - g.R)) * 24));
+      };
+      chart.addEventListener("pointermove", (e) => this._scrub(hourAt(e)));
+      chart.addEventListener("pointerleave", () => this._scrub(null));
+      chart.addEventListener("click", (e) => {
+        this._slot = slotAt(this._draft.schedule, hourAt(e));
+        this._render();
+      });
+    }
     if (this._panel === "export" && this._qrPayload) {
       loadScript("vendor/qrcode.min.js", "QRCode").then(() => {
         const box = root.querySelector(".qr");
@@ -659,7 +993,7 @@ class K7ScheduleCard extends HTMLElement {
       const r = value === "lamp" || value === "original" ? { schedule: clone(src.schedule), note: "" } : this._aligned(clone(src.schedule));
       this._source = value;
       this._draft = { manual: clone(src.manual), schedule: r.schedule };
-      this._info(value === "lamp" ? "Loaded the current schedule." : `Loaded into the draft.${r.note} Nothing changes on the lamp until you Apply.`);
+      this._info(value === "lamp" ? this._t("m_loaded_lamp") : this._t("m_loaded", { n: r.note }));
     } catch (err) { this._error(err); }
   }
 
@@ -667,6 +1001,8 @@ class K7ScheduleCard extends HTMLElement {
     try {
       switch (act) {
         case "dismiss": this._msg = null; return this._render();
+        case "view-draft": return this._switchView("draft");
+        case "view-lamp": return this._switchView("lamp");
         case "prev":
         case "next": {
           const n = this._draft.schedule.length;
@@ -679,16 +1015,16 @@ class K7ScheduleCard extends HTMLElement {
         case "apply-yes": {
           const acc = !!this._acc();
           this._setPanel(null);
-          this._info("Writing schedule to the lamp…");
+          this._info(this._t("m_writing"));
           const res = await this._ws({ type: "k7_lamp/apply", entry_id: this._lamp.entry_id, ...this._draft });
           this._updateLamp(res);
-          if (acc) return this._info("Acclimation target updated.");
-          return this._info(res.written ? "Schedule written. The lamp is in auto mode." : "The lamp already had this schedule; nothing written.");
+          if (acc) return this._info(this._t("m_acc_updated"));
+          return this._info(this._t(res.written ? "m_written" : "m_same"));
         }
         case "revert":
           this._draft = clone(this._baseline());
           this._source = this._acc() ? null : "lamp";
-          return this._info(this._acc() ? "Draft reset to the acclimation target." : "Draft reset to the lamp's schedule.");
+          return this._info(this._t(this._acc() ? "m_reset_acc" : "m_reset_lamp"));
         case "acc": this._setPanel("acc"); return this._render();
         case "moon": this._setPanel("moon"); return this._render();
         case "moon-save": {
@@ -699,29 +1035,29 @@ class K7ScheduleCard extends HTMLElement {
           const max = +val("max_level").value;
           const enabled = val("enabled").checked;
           const follow_moon = val("follow_moon").checked;
-          if (!(max >= 1 && max <= 50)) return this._error("Level at full moon must be 1–50%.");
+          if (!(max >= 1 && max <= 50)) return this._error(this._t("m_moon_range"));
           this._setPanel(null);
-          this._info("Saving moonlight…");
+          this._info(this._t("m_moon_saving"));
           const res = await this._ws({ type: "k7_lamp/set_moonlight", entry_id: this._lamp.entry_id,
             enabled, max_level: max, follow_moon, channels });
           this._updateLamp(res);
-          return this._info(this._moonOn() ? "Moonlight saved; the lamp has tonight's moon." : "Moonlight off.");
+          return this._info(this._t(this._moonOn() ? "m_moon_saved" : "m_moon_off"));
         }
         case "align": {
           const r = this._aligned(this._draft.schedule);
           this._draft.schedule = r.schedule;
-          return this._info(`Draft shifted.${r.note} Apply to send it to the lamp.`);
+          return this._info(this._t("m_shifted", { n: r.note }));
         }
         case "acc-go": {
           const start = +this.shadowRoot.querySelector("[data-act=acc-start]").value;
           const days = +this.shadowRoot.querySelector("[data-act=acc-days]").value;
-          if (!(start >= 1 && start <= 99 && days >= 1 && days <= 120)) return this._error("Start must be 1–99% and duration 1–120 days.");
+          if (!(start >= 1 && start <= 99 && days >= 1 && days <= 120)) return this._error(this._t("m_acc_range"));
           this._setPanel(null);
-          this._info("Starting acclimation…");
+          this._info(this._t("m_acc_starting"));
           const res = await this._ws({ type: "k7_lamp/start_acclimation", entry_id: this._lamp.entry_id,
             ...this._draft, start_percent: start, days });
           this._updateLamp(res);
-          return this._info(`Acclimation started at ${start}% over ${days} days.`);
+          return this._info(this._t("m_acc_started", { s: start, d: days }));
         }
         case "acc-stop": this._setPanel("acc-stop"); return this._render();
         case "acc-keep":
@@ -731,11 +1067,11 @@ class K7ScheduleCard extends HTMLElement {
             keep_current: act === "acc-keep" });
           this._updateLamp(res);
           this._draft = clone(this._baseline());
-          return this._info(act === "acc-keep" ? "Acclimation stopped; the lamp keeps the reduced schedule." : "Acclimation stopped; full schedule written.");
+          return this._info(this._t(act === "acc-keep" ? "m_acc_kept" : "m_acc_full"));
         }
         case "sync":
           await this._ws({ type: "k7_lamp/sync_clock", entry_id: this._lamp.entry_id });
-          return this._info("Lamp clock set to Home Assistant's local time.");
+          return this._info(this._t("m_synced"));
         case "save": this._setPanel("save"); return this._render();
         case "save-yes": {
           const name = this.shadowRoot.querySelector("[data-act=name]").value.trim();
@@ -744,20 +1080,20 @@ class K7ScheduleCard extends HTMLElement {
           this._profiles = res.profiles;
           this._source = `p:${name}`;
           this._setPanel(null);
-          return this._info(`Saved profile "${name}".`);
+          return this._info(this._t("m_saved", { n: name }));
         }
         case "delete": {
           const name = this._selectedProfile();
           if (!name) return;
           if (e.currentTarget.dataset.armed !== "1") {
             e.currentTarget.dataset.armed = "1";
-            e.currentTarget.textContent = `Really delete "${name}"?`;
+            e.currentTarget.textContent = this._t("really_delete", { n: name });
             return;
           }
           const res = await this._ws({ type: "k7_lamp/delete_profile", name });
           this._profiles = res.profiles;
           this._source = null;
-          return this._info(`Deleted profile "${name}".`);
+          return this._info(this._t("m_deleted", { n: name }));
         }
         case "import": this._setPanel("import"); this._msg = null; return this._render();
         case "qrload": return this._importPayload(this.shadowRoot.querySelector("[data-act=qrtext]").value);
@@ -770,7 +1106,7 @@ class K7ScheduleCard extends HTMLElement {
         }
         case "copy":
           await navigator.clipboard.writeText(this._qrPayload);
-          return this._info("QR text copied.");
+          return this._info(this._t("m_copied"));
       }
     } catch (err) {
       this._error(err);
@@ -787,7 +1123,7 @@ class K7ScheduleCard extends HTMLElement {
       this._draft = { manual: res.manual, schedule: r.schedule };
       this._source = null;
       this._setPanel(null);
-      this._info(`QR code loaded into the draft.${r.note} Check it, then Apply to lamp.`);
+      this._info(this._t("m_qr_loaded", { n: r.note }));
     } catch (err) {
       this._error(err);
     }
@@ -811,7 +1147,7 @@ class K7ScheduleCard extends HTMLElement {
       const ctx = c.getContext("2d");
       ctx.drawImage(bmp, 0, 0, c.width, c.height);
       const text = await this._decode(ctx.getImageData(0, 0, c.width, c.height));
-      if (!text) return this._error("No QR code found in that image. Try a sharper or closer crop.");
+      if (!text) return this._error(this._t("m_no_qr"));
       await this._importPayload(text);
     } catch (err) {
       this._error(err);
@@ -820,7 +1156,7 @@ class K7ScheduleCard extends HTMLElement {
 
   async _startCamera() {
     this._lastBad = null;
-    if (!navigator.mediaDevices?.getUserMedia) return this._error("Camera not available here (needs HTTPS). Use an image instead.");
+    if (!navigator.mediaDevices?.getUserMedia) return this._error(this._t("m_no_camera"));
     if (this._panel !== "import" || this._cameraPending) return;
     const request = (this._cameraRequest || 0) + 1;
     this._cameraRequest = request;
@@ -874,67 +1210,194 @@ class K7ScheduleCard extends HTMLElement {
 }
 
 const STYLE = `
-  ha-card { padding: 12px 16px 16px; }
-  .head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-  .title { font-size: 1.2em; font-weight: 500; margin-right: auto; }
-  .chip { font-size: .8em; padding: 2px 8px; border-radius: 10px; background: var(--secondary-background-color); }
-  .chip.ok { color: var(--success-color, #2e7d32); }
-  .chip.warn { color: var(--warning-color, #e65100); }
-  .chip.bad { color: var(--error-color, #c62828); }
-  .msg { display: flex; align-items: center; padding: 6px 10px; border-radius: 6px; margin: 4px 0 8px; font-size: .9em;
-         background: var(--secondary-background-color); }
-  .msg.error { color: var(--error-color, #c62828); }
-  .msg .x { margin-left: auto; border: none; background: none; font-size: 1.2em; padding: 0 4px; }
-  .loading { padding: 24px; color: var(--secondary-text-color); }
-  .chartwrap { position: relative; height: 240px; }
-  .strip { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; margin: 6px 0 10px; }
-  .cell { height: 26px; border-radius: 3px; cursor: pointer; display: flex; align-items: flex-end; justify-content: center;
-          border: 2px solid transparent; box-sizing: border-box; }
-  .cell span { font-size: 9px; color: #888; mix-blend-mode: difference; }
-  .cell.sel { border-color: var(--primary-color); }
-  .cell.now:not(.sel) { border: 2px dashed var(--primary-color); }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  :host { display: block; }
+  ha-card {
+    --k7-ink: #f5f5f7; --k7-ink2: rgba(235,235,245,.62); --k7-ink3: rgba(235,235,245,.34);
+    --k7-fill: rgba(118,118,128,.24); --k7-fill2: rgba(118,118,128,.12); --k7-hair: rgba(255,255,255,.08);
+    --k7-panel: rgba(255,255,255,.04); --k7-edge: rgba(255,255,255,.08); --k7-seam: #0b0e15;
+    --k7-accent: #64d2ff; --k7-accent-ink: #002a3a; --k7-blue: #0a84ff; --k7-green: #30d158; --k7-orange: #ff9f0a; --k7-red: #ff453a;
+    --k7-thumb: rgba(99,99,102,.75);
+    position: relative; overflow: hidden; padding: 20px 20px 18px; border-radius: 26px; color: var(--k7-ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--ha-font-family-body, Roboto), "Helvetica Neue", sans-serif;
+    font-size: 15px; line-height: 1.4; -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums;
+    background:
+      radial-gradient(120% 60% at 50% 0%, rgba(64,110,255,.20), transparent 60%),
+      radial-gradient(80% 50% at 100% 100%, rgba(40,190,255,.08), transparent 60%),
+      linear-gradient(180deg, #0d1424 0%, #0a0d14 50%, #08090c 100%);
+    border: none; box-shadow: 0 0 0 .5px rgba(255,255,255,.10) inset, 0 24px 60px -30px rgba(40,90,255,.35);
+  }
+  ha-card.light {
+    --k7-ink: #1d1d1f; --k7-ink2: rgba(60,60,67,.62); --k7-ink3: rgba(60,60,67,.36);
+    --k7-fill: rgba(118,118,128,.14); --k7-fill2: rgba(118,118,128,.08); --k7-hair: rgba(60,60,67,.12);
+    --k7-panel: rgba(255,255,255,.72); --k7-edge: rgba(0,0,0,.06); --k7-seam: #ffffff;
+    --k7-accent: #0a84ff; --k7-accent-ink: #ffffff; --k7-blue: #007aff; --k7-green: #248a3d; --k7-orange: #c93400; --k7-red: #d70015;
+    --k7-thumb: #ffffff;
+    background:
+      radial-gradient(120% 60% at 50% 0%, rgba(90,130,255,.14), transparent 60%),
+      linear-gradient(180deg, #f3f6ff 0%, #f7f8fb 50%, #ffffff 100%);
+    box-shadow: 0 0 0 .5px rgba(0,0,0,.08) inset, 0 18px 40px -28px rgba(40,90,255,.35);
+  }
+  button { font: inherit; color: inherit; }
+  .head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .title { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin-right: auto; }
+  .pill { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--k7-fill2);
+    color: var(--k7-ink2); display: inline-flex; align-items: center; gap: 6px; }
+  .pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.ok { color: var(--k7-green); background: color-mix(in srgb, var(--k7-green) 14%, transparent); }
+  .pill.warn { color: var(--k7-orange); background: color-mix(in srgb, var(--k7-orange) 15%, transparent); }
+  .pill.bad { color: var(--k7-red); background: color-mix(in srgb, var(--k7-red) 14%, transparent); }
+  .msg { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 14px; margin: 0 0 10px; font-size: 14px;
+    background: var(--k7-panel); box-shadow: 0 0 0 .5px var(--k7-edge) inset; }
+  .msg.error { color: var(--k7-red); }
+  .msg .x { margin-left: auto; border: none; background: none; font-size: 20px; line-height: 1; padding: 0 4px; cursor: pointer; color: var(--k7-ink2); }
+  .loading { padding: 28px 4px; color: var(--k7-ink2); }
+  .acc { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; align-items: center; padding: 14px 16px; border-radius: 18px;
+    background: var(--k7-panel); box-shadow: 0 0 0 .5px var(--k7-edge) inset; margin-bottom: 4px; }
+  .acc .t { font-size: 15px; font-weight: 600; }
+  .acc .t span { color: var(--k7-ink2); font-weight: 500; }
+  .acc .t em { font-style: normal; font-weight: 700; color: var(--k7-accent); }
+  .progress { grid-column: 1; height: 6px; border-radius: 3px; background: var(--k7-fill); overflow: hidden; }
+  .progress b { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #5e7bff, #64d2ff);
+    box-shadow: 0 0 12px rgba(100,210,255,.55); }
+  .acc .s { grid-column: 1; font-size: 13px; color: var(--k7-ink3); }
+  .acc .btn { grid-column: 2; grid-row: 1 / span 3; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; cursor: pointer;
+    font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: 12px; background: var(--k7-fill); color: var(--k7-ink);
+    transition: transform .12s, background .2s, opacity .2s; }
+  .btn:active { transform: scale(.97); }
+  .btn.small { padding: 4px 10px; font-size: 13px; border-radius: 9px; }
+  .btn.tint { background: color-mix(in srgb, var(--k7-blue) 18%, transparent); color: var(--k7-blue); }
+  .dark .btn.tint { color: #4aa3ff; }
+  .btn.primary { background: var(--k7-blue); color: #fff; box-shadow: 0 6px 20px -8px var(--k7-blue); }
+  .btn.ghost { background: none; color: var(--k7-ink2); }
+  .btn:disabled { opacity: .35; cursor: default; box-shadow: none; }
+  .btn.sq { width: 32px; height: 32px; padding: 0; border-radius: 10px; font-size: 17px; }
+  .btn:focus-visible, .chan:focus-visible, .cell:focus-visible, select:focus-visible, input:focus-visible {
+    outline: 2px solid var(--k7-accent); outline-offset: 2px; }
+  .seg { display: inline-flex; padding: 2px; border-radius: 10px; background: var(--k7-fill); margin-left: auto; flex-shrink: 0; }
+  .seg button { border: none; background: none; cursor: pointer; padding: 5px 12px; font-size: 13px; font-weight: 600; border-radius: 8px;
+    transition: background .25s, box-shadow .25s; }
+  .seg button span { color: var(--k7-ink2); font-weight: 500; margin-left: 4px; }
+  .seg button.on { background: var(--k7-thumb); box-shadow: 0 3px 8px rgba(0,0,0,.18), 0 0 0 .5px rgba(0,0,0,.04); }
+  .charthead { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 12px 0 0; min-height: 30px; }
+  .now { font-size: 13px; color: var(--k7-ink2); font-weight: 500; }
+  .now b { color: var(--k7-ink); font-weight: 600; }
+  .chart { position: relative; margin: 4px 0 0; touch-action: pan-y; cursor: pointer; }
+  .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart .tick { fill: var(--k7-ink3); font-size: 11.5px; font-weight: 500; }
+  .chart .grid { stroke: var(--k7-hair); stroke-dasharray: 2 5; }
+  .chart .base { stroke: var(--k7-hair); }
+  .chart .selband { fill: color-mix(in srgb, var(--k7-accent) 10%, transparent); }
+  .chart .seam { fill: none; stroke: var(--k7-seam); stroke-width: 2; stroke-opacity: .9; }
+  .chart .ghost { fill: none; stroke: var(--k7-ink2); stroke-width: 1.2; stroke-dasharray: 3 4; opacity: .7; }
+  .legend { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--k7-ink2); }
+  .legend i { width: 16px; border-top: 1.5px dashed var(--k7-ink2); }
+  .legend + .seg { margin-left: 10px; }
+  .chart .accstop { stop-color: var(--k7-accent); }
+  .chart .nowhalo { fill: var(--k7-accent); fill-opacity: .22; }
+  .chart .nowdot { fill: #fff; stroke: var(--k7-accent); stroke-width: 2; }
+  .chart .nowpill { fill: var(--k7-accent); }
+  .chart .nowtxt { fill: var(--k7-accent-ink); font-size: 12px; font-weight: 700; }
+  .chart .shair { stroke: var(--k7-ink2); stroke-width: 1; }
+  .chart .sdot { stroke: var(--k7-seam); stroke-width: 1.5; }
+  .tip { position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; padding: 4px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity .15s;
+    background: rgba(44,44,46,.86); color: #f5f5f7; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 0 0 .5px rgba(255,255,255,.12) inset, 0 6px 18px rgba(0,0,0,.3); }
+  .tip span { color: rgba(235,235,245,.62); font-weight: 500; margin-left: 6px; }
+  .strip { display: grid; gap: 3px; margin: 8px 0 4px; }
+  .cell { position: relative; height: 30px; padding: 0; border: none; border-radius: 7px; cursor: pointer; background: var(--k7-fill2);
+    box-shadow: 0 0 0 .5px var(--k7-edge) inset; transition: transform .15s; }
+  .cell:hover { transform: translateY(-1px); }
+  .cell span { position: absolute; left: 0; right: 0; bottom: 3px; text-align: center; font-size: 9.5px; font-weight: 600;
+    color: rgba(255,255,255,.6); mix-blend-mode: difference; }
+  .light .cell span { color: rgba(255,255,255,.75); }
+  .cell.sel { box-shadow: 0 0 0 2px var(--k7-accent), 0 0 14px color-mix(in srgb, var(--k7-accent) 55%, transparent); }
+  .cell.now:not(.sel) { box-shadow: 0 0 0 1.5px var(--k7-accent) inset; }
+  .group { margin-top: 12px; border-radius: 18px; background: var(--k7-panel); box-shadow: 0 0 0 .5px var(--k7-edge) inset; }
+  .item { display: flex; align-items: center; gap: 12px; padding: 10px 16px; min-height: 44px; }
+  .item + .item { border-top: .5px solid var(--k7-hair); }
+  .item .lbl { font-size: 15px; margin-right: auto; }
+  .item .val { color: var(--k7-ink2); font-size: 14px; text-align: right; }
+  select.ios { appearance: none; -webkit-appearance: none; font: inherit; font-size: 15px; color: var(--k7-accent); background: none; border: none;
+    padding: 2px 18px 2px 0; cursor: pointer; max-width: 100%; text-overflow: ellipsis;
+    background-image: linear-gradient(45deg, transparent 50%, var(--k7-accent) 50%), linear-gradient(135deg, var(--k7-accent) 50%, transparent 50%);
+    background-position: right 6px top 55%, right 1px top 55%; background-size: 5px 5px; background-repeat: no-repeat; }
+  select.ios option, select.ios optgroup { color: initial; }
+  select.ios:disabled { opacity: .4; }
+  .sw { position: relative; display: inline-block; width: 51px; height: 31px; flex-shrink: 0; }
+  .sw input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
+  .sw b { position: absolute; inset: 0; border-radius: 999px; background: rgba(120,120,128,.32); transition: background .25s; }
+  .sw b::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff;
+    box-shadow: 0 3px 8px rgba(0,0,0,.2); transition: transform .25s cubic-bezier(.3,.7,.2,1); }
+  .sw input:checked + b { background: var(--k7-green); }
+  .sw input:checked + b::after { transform: translateX(20px); }
+  .sw input:focus-visible + b { outline: 2px solid var(--k7-accent); outline-offset: 2px; }
+  .sw.sm { width: 42px; height: 26px; }
+  .sw.sm b::after { width: 22px; height: 22px; }
+  .sw.sm input:checked + b::after { transform: translateX(16px); }
+  .sec { display: flex; align-items: center; justify-content: space-between; margin: 18px 4px 8px; }
+  .sec b { font-size: 13px; font-weight: 600; color: var(--k7-ink2); text-transform: uppercase; letter-spacing: .03em; }
+  .link { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; color: var(--k7-ink2); cursor: pointer; }
+  .chans { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chan { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px 7px 10px; border: none; border-radius: 999px; cursor: pointer;
+    font-size: 14px; font-weight: 600; background: color-mix(in srgb, var(--c) 16%, transparent);
+    box-shadow: 0 0 0 .5px color-mix(in srgb, var(--c) 40%, transparent) inset; transition: background .2s, color .2s; }
+  .chan i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
+  .chan.off { background: var(--k7-fill2); color: var(--k7-ink3); box-shadow: none; }
+  .chan.off i { background: transparent; box-shadow: 0 0 0 1.5px var(--k7-ink3) inset; }
+  .slot { margin-top: 10px; padding: 14px 16px 8px; border-radius: 20px; background: var(--k7-panel); box-shadow: 0 0 0 .5px var(--k7-edge) inset; }
+  .slot .top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .slot h3 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
+  .slot .s { font-size: 13px; color: var(--k7-ink3); margin-left: 4px; }
+  .slot .nav { margin-left: auto; display: flex; gap: 6px; }
+  .sl { display: grid; grid-template-columns: 112px 1fr 60px; align-items: center; gap: 12px; padding: 6px 0; }
+  .sl .n { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
+  .sl .n i, .mch i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); flex-shrink: 0; }
+  .sl .n.off { opacity: .4; }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; margin: 0; background: none; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px;
+    background: linear-gradient(90deg, var(--c) var(--p), var(--k7-fill) var(--p)); }
+  input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--c) var(--p), var(--k7-fill) var(--p)); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; margin-top: -9px; border-radius: 50%;
+    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.3), 0 0 0 .5px rgba(0,0,0,.08); }
+  input[type=range]::-moz-range-thumb { width: 24px; height: 24px; border: none; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+  .num, .field { font: inherit; color: var(--k7-ink); background: var(--k7-fill2); border: none; border-radius: 10px; padding: 6px 8px; }
+  .num { width: 60px; box-sizing: border-box; text-align: right; font-size: 16px; font-weight: 600; -moz-appearance: textfield; }
+  .num::-webkit-inner-spin-button, .num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .field { width: 64px; }
+  .field.wide { flex: 1; min-width: 160px; width: auto; }
+  .prof { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px 8px 16px; border-radius: 16px;
+    background: var(--k7-panel); box-shadow: 0 0 0 .5px var(--k7-edge) inset; flex-wrap: wrap; }
+  .prof select { min-width: 0; flex: 0 1 auto; }
   .grow { flex: 1; }
-  .toggles { font-size: .85em; gap: 4px 12px; }
-  .tog { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-  .tog i, .lbl i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid #8886; }
-  .tog.link { margin-left: auto; }
-  .slot { border: 1px solid var(--divider-color); border-radius: 8px; padding: 8px 10px; }
-  .slothead { display: flex; align-items: center; gap: 6px; font-weight: 500; margin-bottom: 4px; }
-  .slothead button { padding: 0 10px; }
-  .sl { display: grid; grid-template-columns: 110px 1fr 56px; align-items: center; gap: 8px; font-size: .9em; }
-  .lbl { display: inline-flex; align-items: center; gap: 6px; }
-  .sl input[type=range] { width: 100%; }
-  .sl input[type=number] { width: 52px; }
-  button, .btn, select, input[type=text], textarea {
-    font: inherit; color: var(--primary-text-color); background: var(--card-background-color);
-    border: 1px solid var(--divider-color); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
-  button:disabled { opacity: .45; cursor: default; }
-  button.primary { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
-  select { max-width: 100%; }
-  textarea { width: 100%; box-sizing: border-box; font-family: monospace; font-size: .8em; cursor: text; }
-  input[type=text] { flex: 1; min-width: 140px; cursor: text; }
-  .panel { border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; margin-top: 8px; }
-  .panel p { margin: 0 0 8px; font-size: .9em; }
-  .acc { border: 1px solid var(--primary-color); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px;
-         display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; }
-  .acc .bar, .acc .small { grid-column: 1; }
-  .acc button { grid-column: 2; grid-row: 1 / span 3; }
-  .bar { height: 6px; border-radius: 3px; background: var(--secondary-background-color); overflow: hidden; }
-  .bar div { height: 100%; background: var(--primary-color); }
-  .muted { color: var(--secondary-text-color); }
-  .small { font-size: .85em; }
-  .panel input[type=number] { width: 60px; font: inherit; }
-  .daystart { font-size: .9em; gap: 6px 12px; }
-  .daystart select { padding: 2px 6px; }
-  .moonline { font-size: .9em; margin: 2px 0 6px; }
-  .mchs { gap: 6px 14px; font-size: .9em; }
-  .mch { display: inline-flex; align-items: center; gap: 4px; }
-  .mch i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid #8886; }
-  .mch input { width: 52px; }
-  .qr { display: flex; justify-content: center; padding: 12px; background: #fff; border-radius: 6px; margin-bottom: 8px; }
-  video { width: 100%; max-height: 320px; border-radius: 6px; margin-top: 8px; background: #000; }
-  @media (max-width: 500px) { .sl { grid-template-columns: 90px 1fr 50px; } .cell span { display: none; } }
+  .foot { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .applyrow { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: .5px solid var(--k7-hair); }
+  .applyrow .hint { margin-right: auto; font-size: 13px; color: var(--k7-ink3); }
+  .panel { margin-top: 12px; padding: 14px 16px; border-radius: 18px; background: var(--k7-panel); box-shadow: 0 0 0 .5px var(--k7-edge) inset; }
+  .panel p { margin: 0 0 10px; font-size: 14px; color: var(--k7-ink2); }
+  .panel p b { color: var(--k7-ink); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 8px 0 0; }
+  .row label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+  .tog { cursor: pointer; }
+  .muted { color: var(--k7-ink2); font-size: 13px; margin-top: 8px; }
+  .mchs { gap: 8px 16px; }
+  .mch .field { width: 56px; }
+  textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--k7-ink);
+    background: var(--k7-fill2); border: none; border-radius: 12px; padding: 10px; }
+  .qr { display: flex; justify-content: center; padding: 14px; background: #fff; border-radius: 14px; margin-bottom: 10px; }
+  video { width: 100%; max-height: 320px; border-radius: 14px; margin-top: 10px; background: #000; }
+  @media (max-width: 560px) {
+    ha-card { padding: 16px 12px 14px; border-radius: 22px; }
+    .strip { gap: 2px; } .cell { height: 24px; border-radius: 5px; } .cell span { display: none; }
+    .sl { grid-template-columns: 92px 1fr 54px; gap: 8px; }
+    .item .val { font-size: 13px; }
+    .now { flex-basis: 100%; }
+    .legend { margin-left: 0; }
+    .acc { grid-template-columns: 1fr; }
+    .acc .btn { grid-column: 1; grid-row: auto; justify-self: start; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 `;
 
 customElements.define("k7-schedule-card", K7ScheduleCard);
