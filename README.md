@@ -4,9 +4,9 @@ Local control of a **Noo-Psyche K7 Pro** reef light from Home Assistant, over yo
 
 > **Unofficial.** This project is not affiliated with or endorsed by Noo-Psyche. It is built on the protocol work of [bitbarista/k7-led-controller](https://github.com/bitbarista/k7-led-controller).
 
-![Schedule editor card](docs/card.png)
+<p align="center"><img src="docs/card.png" alt="Schedule editor card" width="560"></p>
 
-*The schedule card during an acclimation: the chart shows the full target, the banner today's percentage.*
+*The schedule card during an acclimation. The stacked chart shows the full target (height is total light, layers are the spectrum); the dashed line is what the lamp runs today at 25 %. Switch to **Today** to see that instead.*
 
 Looking for a complete setup? [`examples/aquarium`](examples/aquarium) has a full aquarium dashboard with feed and water-change buttons, leak and power-outage alerts and energy tracking, built around this card.
 
