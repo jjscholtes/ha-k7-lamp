@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- Light widget uses Home Assistant's own card look (theme background, border, text colours) so it sits naturally between tiles; the title is optional and the on/off state is a line under the power.
+
 ## 0.7.0
 
 - Manual mode: a **Manual mode** switch and a **Manual <channel>** slider (0–100 %) per channel. They send the lamp's live mode and manual-level commands, so the schedule is left alone and the lamp doesn't pause for a full write. Tested on a K7 Pro IV: all channels at 100 % hold steady (about 93 W) until the switch goes back to auto.

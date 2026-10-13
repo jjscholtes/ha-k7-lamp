@@ -7,7 +7,7 @@
  * bundled presets come from bitbarista/k7-led-controller (MIT); see NOTICE.md.
  */
 const BASE = "/k7_lamp";
-const VERSION = "0.7.0";
+const VERSION = "0.7.1";
 // Physical LED colours: only used to mix the light colour of a slot (strip and chart backdrop).
 const COLORS = ["#f5f5f5", "#3b3bff", "#22c55e", "#9b30ff", "#00d5ff", "#ff3030"];
 // Chart colours per theme. Blue/UV and red/green stay close for colour-blind readers,
@@ -1497,20 +1497,21 @@ class K7LightCard extends K7ScheduleCard {
           <span class="bar"><b style="width:${levels[c]}%;background:${cols[c]}"></b></span>
           <span class="pct">${levels[c]}%</span>
         </div>`).join("");
+      const state = [st.text, st.sub].filter(Boolean).join(" · ");
       body = `
+        ${this._config.title ? `<div class="w-title">${esc(this._config.title)}</div>` : ""}
         <div class="w-main">
           <div class="w-power">
             <div class="w-big">${watt === null ? mean : Math.round(watt)}<small>${watt === null ? "%" : " W"}</small></div>
             <div class="w-sub">${this._t("w_of_full", { p: mean })}</div>
-            ${st.sub ? `<div class="w-sub">${esc(st.sub)}</div>` : ""}
+            <div class="w-state ${st.cls}"><i></i>${esc(state)}</div>
           </div>
           <div class="w-chs">${rows}</div>
         </div>`;
-      body = `<div class="head w-head"><div class="w-title">${esc(this._config.title || this._t("w_title"))}</div>
-        <span class="pill ${st.cls}"><i></i>${esc(st.text)}</span></div>${body}`;
     }
-    root.innerHTML = `<style>${STYLE}${WIDGET_STYLE}</style>
-      <ha-card class="${this._dark() ? "dark" : "light"}${this._config.navigation_path ? " nav" : ""}">${body}</ha-card>`;
+    // Plain Home Assistant card: theme background, border, radius and text colours, like the tiles around it.
+    root.innerHTML = `<style>${WIDGET_STYLE}</style>
+      <ha-card class="${this._config.navigation_path ? "nav" : ""}">${body}</ha-card>`;
     const path = this._config.navigation_path;
     if (path) {
       root.querySelector("ha-card").addEventListener("click", () => {
@@ -1524,23 +1525,28 @@ class K7LightCard extends K7ScheduleCard {
 }
 
 const WIDGET_STYLE = `
-  ha-card { padding: 16px 18px 16px; border-radius: 22px; }
+  :host { display: block; }
+  ha-card { padding: 16px; height: 100%; box-sizing: border-box; color: var(--primary-text-color); }
   ha-card.nav { cursor: pointer; }
-  .w-head { margin-bottom: 10px; }
-  .w-title { font-size: 17px; font-weight: 600; letter-spacing: -.01em; margin-right: auto; }
-  .w-main { display: grid; grid-template-columns: minmax(96px, auto) 1fr; gap: 6px 22px; align-items: center; }
-  .w-big { font-size: 44px; font-weight: 700; letter-spacing: -.035em; line-height: 1; }
-  .w-big small { font-size: 20px; font-weight: 600; letter-spacing: -.01em; color: var(--k7-ink2); margin-left: 2px; }
-  .w-sub { font-size: 13px; color: var(--k7-ink2); margin-top: 6px; }
-  .w-sub + .w-sub { margin-top: 1px; }
+  .loading { color: var(--secondary-text-color); }
+  .w-title { font-size: 16px; font-weight: 500; margin-bottom: 12px; }
+  .w-main { display: grid; grid-template-columns: minmax(96px, auto) 1fr; gap: 8px 24px; align-items: center; }
+  .w-big { font-size: 36px; font-weight: 400; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .w-big small { font-size: 18px; color: var(--secondary-text-color); margin-left: 2px; }
+  .w-sub { font-size: 12px; color: var(--secondary-text-color); margin-top: 4px; }
+  .w-state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--secondary-text-color); margin-top: 2px; }
+  .w-state i { width: 8px; height: 8px; border-radius: 50%; background: var(--disabled-color, #bdbdbd); flex: none; }
+  .w-state.ok i { background: var(--success-color, #4caf50); }
+  .w-state.warn i { background: var(--warning-color, #ff9800); }
+  .w-state.bad i { background: var(--error-color, #db4437); }
   .w-chs { display: grid; gap: 6px; min-width: 0; }
-  .ch { display: grid; grid-template-columns: 8px minmax(64px, auto) 1fr 38px; align-items: center; gap: 8px; font-size: 13px; }
+  .ch { display: grid; grid-template-columns: 8px minmax(64px, auto) 1fr 36px; align-items: center; gap: 8px; font-size: 12px; }
   .ch .dot { width: 8px; height: 8px; border-radius: 50%; }
-  .ch .nm { color: var(--k7-ink2); white-space: nowrap; }
-  .ch .bar { height: 6px; border-radius: 3px; background: var(--k7-fill); overflow: hidden; }
+  .ch .nm { color: var(--secondary-text-color); white-space: nowrap; }
+  .ch .bar { height: 6px; border-radius: 3px; background: var(--secondary-background-color, rgba(127,127,127,.15)); overflow: hidden; }
   .ch .bar b { display: block; height: 100%; border-radius: 3px; transition: width .4s ease; }
-  .ch .pct { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .ch.zero .nm, .ch.zero .pct { color: var(--k7-ink3); }
+  .ch .pct { text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .ch.zero .nm, .ch.zero .pct { color: var(--disabled-text-color, var(--secondary-text-color)); }
   .ch.zero .dot { opacity: .35; }
   @media (max-width: 420px) { .w-main { grid-template-columns: 1fr; } }
 `;
