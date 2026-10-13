@@ -42,6 +42,4 @@ class K7ManualLevelNumber(K7Entity, NumberEntity):
         return self.coordinator.data.manual[self._idx]
 
     async def async_set_native_value(self, value: float) -> None:
-        levels = list(self.coordinator.data.manual)
-        levels[self._idx] = round(value)
-        await self.coordinator.async_set_manual_levels(levels)
+        await self.coordinator.async_set_manual_level(self._idx, round(value))

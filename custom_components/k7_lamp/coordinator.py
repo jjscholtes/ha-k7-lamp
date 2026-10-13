@@ -193,9 +193,12 @@ class K7Coordinator(DataUpdateCoordinator[K7State]):
         await self._live_command(set_mode, auto, "mode")
 
     @_program_action
-    async def async_set_manual_levels(self, levels: list[int]) -> None:
-        """Change the manual levels; visible at once when the lamp is in manual mode."""
-        await self._live_command(set_levels, list(levels), "manual levels")
+    async def async_set_manual_level(self, idx: int, value: int) -> None:
+        """Change one channel's manual level; visible at once when the lamp is in manual mode."""
+        # Built under the lock so concurrent changes (one action on several sliders) all stick.
+        levels = list(self.data.manual)
+        levels[idx] = value
+        await self._live_command(set_levels, levels, "manual levels")
         # Explicit writes send the program's manual levels; keep them in step with the lamp.
         prog = self.program()
         if prog is not None and prog.target_manual != self.data.manual:

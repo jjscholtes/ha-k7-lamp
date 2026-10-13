@@ -26,7 +26,7 @@ from custom_components.k7_lamp import (
 from custom_components.k7_lamp.model import DEFAULT_MOON, Program
 from custom_components.k7_lamp.profiles import ProfileStore
 from custom_components.k7_lamp.program import ProgramStore
-from custom_components.k7_lamp.protocol import K7Error, K7State, state_rows
+from custom_components.k7_lamp.protocol import CHANNELS, K7Error, K7State, state_rows
 
 
 def entry(name="one"):
@@ -534,6 +534,15 @@ def test_manual_level_changes_one_channel_and_keeps_the_program_in_step(run):
         assert ent.native_value == 100
         assert e.store.get("one").target_manual == [50, 50, 50, 100, 50, 50]
         assert not e.lamp.writes
+    run(check)
+
+
+def test_concurrent_manual_levels_all_stick(run):
+    async def check(e):
+        fake_live_commands(e)
+        ents = [number.K7ManualLevelNumber(e.c, i, ch) for i, ch in enumerate(CHANNELS)]
+        await asyncio.gather(*(ent.async_set_native_value(100) for ent in ents))
+        assert e.lamp.state.manual == [100] * 6
     run(check)
 
 
