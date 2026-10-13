@@ -42,6 +42,8 @@ from .protocol import (
     acked,
     photoperiod,
     read_all,
+    set_levels,
+    set_mode,
     sort_rows,
     state_rows,
     sync_time,
@@ -171,6 +173,33 @@ class K7Coordinator(DataUpdateCoordinator[K7State]):
         if not acked(reply):
             raise HomeAssistantError("Lamp did not acknowledge the clock sync")
         _LOGGER.debug("Clock synced to %s on %s", now.strftime("%H:%M:%S"), self.host)
+
+    # --- Manual mode: live commands that leave the schedule alone ---
+
+    async def _live_command(self, command, arg, what: str) -> None:
+        """Send MODE or HAND_LUMINANCE, then read the lamp back under the lamp lock."""
+        async with self.lock:
+            try:
+                reply = await command(self.host, self.port, arg)
+                state = await self._read()
+            except K7Error as err:
+                raise HomeAssistantError(f"Setting {what} failed: {err}") from err
+        self.async_set_updated_data(state)
+        if not acked(reply):
+            raise HomeAssistantError(f"Lamp did not acknowledge the {what}")
+
+    async def async_set_mode(self, auto: bool) -> None:
+        """Run the schedule (auto) or hold the stored manual levels (manual)."""
+        await self._live_command(set_mode, auto, "mode")
+
+    @_program_action
+    async def async_set_manual_levels(self, levels: list[int]) -> None:
+        """Change the manual levels; visible at once when the lamp is in manual mode."""
+        await self._live_command(set_levels, list(levels), "manual levels")
+        # Explicit writes send the program's manual levels; keep them in step with the lamp.
+        prog = self.program()
+        if prog is not None and prog.target_manual != self.data.manual:
+            await self._store.async_set(self._id, replace(prog, target_manual=list(self.data.manual)))
 
     # --- Program: target schedule in HA + acclimation + moonlight, rebuilt daily ---
 

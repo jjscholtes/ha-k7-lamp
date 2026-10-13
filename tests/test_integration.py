@@ -20,7 +20,9 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from helpers import hourly, sample_schedule
 from custom_components import k7_lamp as integration
-from custom_components.k7_lamp import binary_sensor, button, config_flow, coordinator, sensor, websocket
+from custom_components.k7_lamp import (
+    binary_sensor, button, config_flow, coordinator, number, sensor, switch, websocket,
+)
 from custom_components.k7_lamp.model import DEFAULT_MOON, Program
 from custom_components.k7_lamp.profiles import ProfileStore
 from custom_components.k7_lamp.program import ProgramStore
@@ -333,7 +335,7 @@ async def setup_entry(e):
     entities, callbacks = [], []
 
     async def forward(ent, platforms):
-        for module in (sensor, button, binary_sensor):
+        for module in (sensor, button, binary_sensor, number, switch):
             await module.async_setup_entry(e.hass, ent, entities.extend)
     e.hass.config_entries = SimpleNamespace(async_forward_entry_setups=forward)
     e.monkeypatch.setattr(integration, "K7Coordinator", lambda hass, ent: e.c)
@@ -355,7 +357,7 @@ def test_real_setup_platforms_and_retry_tick_on_minimum_ha(run):
     async def check(e):
         e.clock.now = e.clock.now.replace(hour=14)
         entities, callbacks = await setup_entry(e)
-        assert len(entities) == 17
+        assert len(entities) == 24
         assert "one" in e.profiles.originals
         await e.store.async_set("one", program())
         e.clock.now = e.clock.now.replace(hour=7, minute=30)
@@ -487,4 +489,59 @@ def test_output_sensor_follows_the_clock_between_polls(run):
         e.clock.now = e.clock.now.replace(hour=9, minute=30)  # Royal Blue 10% at 09:00, 30% at 10:00
         tick(e.clock.now)
         assert written == [20]
+    run(check)
+
+
+def fake_live_commands(e):
+    """MODE / HAND_LUMINANCE against the fake lamp; returns the sent commands."""
+    sent = []
+
+    async def mode(host, port, auto):
+        sent.append(("mode", auto))
+        e.lamp.state.auto = auto
+        return bytes.fromhex("abaaa5a1")
+
+    async def levels(host, port, values):
+        sent.append(("levels", list(values)))
+        e.lamp.state.manual = list(values)
+        return bytes.fromhex("abaaa5a1")
+
+    e.monkeypatch.setattr(coordinator, "set_mode", mode)
+    e.monkeypatch.setattr(coordinator, "set_levels", levels)
+    return sent
+
+
+def test_manual_mode_switch_sends_mode_without_rewriting_the_schedule(run):
+    async def check(e):
+        sent = fake_live_commands(e)
+        sw = switch.K7ManualModeSwitch(e.c)
+        assert not sw.is_on
+        await sw.async_turn_on()
+        assert sent == [("mode", False)] and sw.is_on
+        await sw.async_turn_off()
+        assert sent[-1] == ("mode", True) and not sw.is_on
+        assert not e.lamp.writes
+    run(check)
+
+
+def test_manual_level_changes_one_channel_and_keeps_the_program_in_step(run):
+    async def check(e):
+        sent = fake_live_commands(e)
+        await e.store.async_set("one", program())
+        ent = number.K7ManualLevelNumber(e.c, 3, "UV")
+        await ent.async_set_native_value(100)
+        assert sent == [("levels", [50, 50, 50, 100, 50, 50])]
+        assert ent.native_value == 100
+        assert e.store.get("one").target_manual == [50, 50, 50, 100, 50, 50]
+        assert not e.lamp.writes
+    run(check)
+
+
+def test_unacknowledged_manual_command_raises_after_reading_back(run):
+    async def check(e):
+        async def silent(host, port, auto):
+            return b""
+        e.monkeypatch.setattr(coordinator, "set_mode", silent)
+        with pytest.raises(HomeAssistantError):
+            await e.c.async_set_mode(False)
     run(check)

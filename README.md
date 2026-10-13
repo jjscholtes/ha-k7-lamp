@@ -25,6 +25,7 @@ Looking for a complete setup? [`examples/aquarium`](examples/aquarium) has a ful
 - **QR codes:**
   - import a schedule shared as a Noo-Psyche app QR code by pasting its text, choosing a screenshot, or scanning it with the camera
   - export your schedule as a QR code the app can read
+- **Manual mode:** a switch puts the lamp on fixed levels instead of its schedule, with a slider per channel. Both are sent live, without a full schedule write, so the lamp doesn't pause and the schedule stays as it is.
 - **Day starts at:** set the hour your photoperiod should start. Any preset or QR code you load is shifted to match.
 - **Acclimation:** ramps the whole schedule linearly from a start % (e.g. 50%) to 100% over a number of days you choose.
 - **Moonlight that follows the real moon:**
@@ -40,7 +41,7 @@ The lamp keeps running its own 24-point schedule in **auto** mode. Home Assistan
 - If Home Assistant is down, the lamp carries on with the last plan it received. Your tank never depends on HA being up.
 - A full schedule write makes the lamp pause for a few seconds and resets its output. That's why it happens once a day in the dark, and otherwise only when you press **Apply**.
 
-Automatic updates respect **manual mode** and preserve the lamp's current manual levels. Explicit Apply, acclimation and moonlight changes can switch the lamp to auto mode. The integration confirms the schedule by reading it back before recording the update as applied.
+Automatic updates respect **manual mode** and preserve the lamp's current manual levels. The **Manual mode** switch and the **Manual …** sliders use the lamp's own mode and manual-level commands: the lamp keeps its schedule, holds the manual levels until you switch back, and reports both on the next read. Explicit Apply, acclimation and moonlight changes can switch the lamp to auto mode. The integration confirms the schedule by reading it back before recording the update as applied.
 
 Failed automatic updates retry every five minutes inside a window of at most 30 minutes. A write the lamp has acknowledged is never repeated automatically in the same night, even if reading it back doesn't confirm it; press **Apply** to write again. A restart resumes a pending update only inside that window; it does not rewrite an already confirmed plan or catch up during daylight. If the window is missed, a notification explains the pending update. If your target never has a dark interval between two zero points, automatic updates pause until you add one or apply changes explicitly. A single zero point between ramps is not a dark interval.
 

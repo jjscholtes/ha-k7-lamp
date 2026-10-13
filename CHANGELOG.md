@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0
+
+- Manual mode: a **Manual mode** switch and a **Manual <channel>** slider (0–100 %) per channel. They send the lamp's live mode and manual-level commands, so the schedule is left alone and the lamp doesn't pause for a full write. Tested on a K7 Pro IV: all channels at 100 % hold steady (about 93 W) until the switch goes back to auto.
+- Changing a manual level also updates the stored program's manual levels, so a later Apply doesn't put the old ones back.
+
 ## 0.6.1
 
 - Schedule card: the chart axis, hover pill and slot header show lamp output (the mean of the channels, 100 % = every channel at full power) instead of a sum of channel levels that could exceed 100 %.
