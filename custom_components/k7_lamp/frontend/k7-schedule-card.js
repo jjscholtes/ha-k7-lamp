@@ -7,7 +7,7 @@
  * bundled presets come from bitbarista/k7-led-controller (MIT); see NOTICE.md.
  */
 const BASE = "/k7_lamp";
-const VERSION = "0.6.0";
+const VERSION = "0.6.1";
 // Physical LED colours: only used to mix the light colour of a slot (strip and chart backdrop).
 const COLORS = ["#f5f5f5", "#3b3bff", "#22c55e", "#9b30ff", "#00d5ff", "#ff3030"];
 // Chart colours per theme. Blue/UV and red/green stay close for colour-blind readers,
@@ -36,7 +36,7 @@ const STRINGS = {
     moon: "Moon", rises: "rises", sets: "sets",
     moon_now: "moonlight now {p}%", moon_on: "moonlight on (up to {p}%)", moon_off: "moonlight off",
     align: "Align loaded profiles", channels: "Channels", linked: "Move together",
-    slot_dark: "dark", slot_today: "today {p}%",
+    slot_dark: "dark", slot_today: "today {p}%", of_max: "{p}% of full output",
     load: "Load a schedule…", cur_lamp: "Current lamp schedule", saved: "Saved profiles", presets: "Presets (bitbarista)",
     community: "(community)", legacy: "Original (legacy, lamp unknown)",
     save_as: "Save as…", delete: "Delete", really_delete: "Really delete \"{n}\"?",
@@ -93,7 +93,7 @@ const STRINGS = {
     moon: "Maan", rises: "op", sets: "onder",
     moon_now: "maanlicht nu {p}%", moon_on: "maanlicht aan (tot {p}%)", moon_off: "maanlicht uit",
     align: "Geladen profielen uitlijnen", channels: "Kanalen", linked: "Samen bewegen",
-    slot_dark: "donker", slot_today: "vandaag {p}%",
+    slot_dark: "donker", slot_today: "vandaag {p}%", of_max: "{p}% van vol vermogen",
     load: "Schema laden…", cur_lamp: "Huidig lampschema", saved: "Opgeslagen profielen", presets: "Presets (bitbarista)",
     community: "(community)", legacy: "Origineel (oud, lamp onbekend)",
     save_as: "Opslaan als…", delete: "Verwijderen", really_delete: "\"{n}\" echt verwijderen?",
@@ -587,9 +587,9 @@ class K7ScheduleCard extends HTMLElement {
     }
     const peak = Math.max(...sampleTimes([rows]).map((x) => sum(levelsAt(rows, x))));
     const pct = peak ? total / peak : 1;
-    if (pct >= 0.99) return `${head} · ${this._t("full")}`;
+    if (pct >= 0.99) return `${head} · ${this._t("full")} · ${Math.round(total / (this._channels.length || 6))}%`;
     const later = sum(levelsAt(rows, now + 0.25));
-    return `${head} · ${this._t(later >= total ? "rising" : "falling")} ${Math.round(pct * 100)}%`;
+    return `${head} · ${this._t(later >= total ? "rising" : "falling")} · ${Math.round(total / (this._channels.length || 6))}%`;
   }
 
   _body() {
@@ -606,7 +606,9 @@ class K7ScheduleCard extends HTMLElement {
           style="--c:${cols[i]}"><i></i>${esc(this._chName(i))}</button>`)
       .join("");
     const row = d.schedule[sel];
+    // Lamp output: the mean of the channels, so 100 % means every channel at full power.
     const total = row.slice(2).reduce((a, b) => a + b, 0);
+    const output = Math.round(total / (row.length - 2));
     const acc = this._acc();
     const sliders = this._channels
       .map((c, i) => `<div class="sl"><span class="n ${this._visible[i] ? "" : "off"}" style="--c:${cols[i]}"><i></i>${esc(this._chName(i))}</span>
@@ -636,7 +638,7 @@ class K7ScheduleCard extends HTMLElement {
       <div class="chans">${chips}</div>
       <div class="slot">
         <div class="top"><h3>${pad(row[0])}:${pad(row[1])}</h3>
-          <span class="s">${total ? `Σ ${total}%${acc ? ` · ${this._t("slot_today", { p: Math.round(total * acc.percent / 100) })}` : ""}` : this._t("slot_dark")}</span>
+          <span class="s">${total ? `${this._t("of_max", { p: output })}${acc ? ` · ${this._t("slot_today", { p: Math.round(total * acc.percent / 100 / (row.length - 2)) })}` : ""}` : this._t("slot_dark")}</span>
           <div class="nav"><button class="btn sq" data-act="prev" aria-label="‹">‹</button><button class="btn sq" data-act="next" aria-label="›">›</button></div></div>
         ${sliders}
       </div>
@@ -797,12 +799,15 @@ class K7ScheduleCard extends HTMLElement {
     const vis = this._visible;
     const sum = (lv) => lv.reduce((a, v, i) => a + (vis[i] ? v : 0), 0);
     const peak = Math.max(...[draft, shown].map((rows) => Math.max(...xs.map((x) => sum(levelsAt(rows, x))))));
-    const yMax = Math.max(20, Math.ceil((peak * 1.12) / 20) * 20);
+    // The stack adds up channel levels; the axis shows lamp output (mean of the channels, 100 % = all at full power).
+    const n = this._channels.length || 6;
+    const outMax = Math.min(100, Math.max(10, Math.ceil((peak / n) * 1.12 / 10) * 10));
+    const yMax = outMax * n;
     const X = (h) => L + ((W - L - R) * h) / 24;
     const Y = (v) => H - BOT - ((H - BOT - TOP) * v) / yMax;
     const P = (x, y) => `${x.toFixed(1)},${y.toFixed(1)}`;
     const line = (pts) => `M${P(...pts[0])}${mono(pts)}`;
-    this._geo = { W, H, L, R, TOP, BOT, yMax, shown };
+    this._geo = { W, H, L, R, TOP, BOT, yMax, n, shown };
 
     // Ambient light: the mixed light colour of each moment, very soft, fading out upwards.
     const amb = xs.map((x, i) => {
@@ -855,6 +860,8 @@ class K7ScheduleCard extends HTMLElement {
       <rect x="${L}" y="0" width="${W - L - R}" height="${H - BOT}" fill="url(#k7amb)" mask="url(#k7mask)"/>
       <line x1="${L}" x2="${W - R}" y1="${Y(yMax / 2).toFixed(1)}" y2="${Y(yMax / 2).toFixed(1)}" class="grid"/>
       <line x1="${L}" x2="${W - R}" y1="${Y(yMax).toFixed(1)}" y2="${Y(yMax).toFixed(1)}" class="grid"/>
+      <text x="${W - R}" y="${(Y(yMax / 2) - 5).toFixed(1)}" text-anchor="end" class="ylbl">${outMax / 2}%</text>
+      <text x="${W - R}" y="${(Y(yMax) - 5).toFixed(1)}" text-anchor="end" class="ylbl">${outMax}%</text>
       <rect x="${X(a).toFixed(1)}" y="${TOP - 8}" width="${Math.max(2, X(b) - X(a)).toFixed(1)}" height="${H - BOT - TOP + 8}" rx="8" class="selband"/>
       ${topEdge && dark ? `<path d="${line(topEdge)}" fill="none" stroke="#7aa2ff" stroke-width="10" filter="url(#k7glow)" opacity=".45"/>` : ""}
       ${areas.join("")}${edges.join("")}
@@ -892,8 +899,8 @@ class K7ScheduleCard extends HTMLElement {
       if (lv[c] > 0.3) dots += `<circle cx="${X(h).toFixed(1)}" cy="${Y(acc).toFixed(1)}" r="3.5" fill="${cols[c]}" class="sdot"/>`;
     });
     layer.innerHTML = `<line x1="${X(h).toFixed(1)}" x2="${X(h).toFixed(1)}" y1="${g.TOP - 6}" y2="${g.H - g.BOT}" class="shair"/>${dots}`;
-    const total = Math.round(acc);
-    tip.innerHTML = `${fmtHour(h)}<span>${total ? `Σ ${total}%` : this._t("dark")}</span>`;
+    const output = Math.round(acc / g.n);
+    tip.innerHTML = `${fmtHour(h)}<span>${acc >= 0.5 ? `${output}%` : this._t("dark")}</span>`;
     tip.style.left = `${(X(h) / g.W) * 100}%`;
     tip.style.opacity = 1;
   }
@@ -1285,6 +1292,7 @@ const STYLE = `
   .chart { position: relative; margin: 4px 0 0; touch-action: pan-y; cursor: pointer; }
   .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
   .chart .tick { fill: var(--k7-ink3); font-size: 11.5px; font-weight: 500; }
+  .chart .ylbl { fill: var(--k7-ink3); font-size: 11px; font-weight: 500; }
   .chart .grid { stroke: var(--k7-hair); stroke-dasharray: 2 5; }
   .chart .base { stroke: var(--k7-hair); }
   .chart .selband { fill: color-mix(in srgb, var(--k7-accent) 10%, transparent); }

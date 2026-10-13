@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- Schedule card: the chart axis, hover pill and slot header show lamp output (the mean of the channels, 100 % = every channel at full power) instead of a sum of channel levels that could exceed 100 %.
+
 ## 0.6.0
 
 - Schedule card redesign. The chart is now a stacked area of the channels (height = total light, layers = spectrum), drawn in plain SVG at the card's real width; Chart.js and its drag plugin are no longer bundled.
