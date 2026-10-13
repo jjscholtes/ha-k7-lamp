@@ -7,6 +7,6 @@ SCAN_INTERVAL = timedelta(minutes=5)  # writes refresh at once; estimates tick e
 ALL_SET_SETTLE = 4  # seconds the lamp is busy after a full schedule write
 CLOCK_SYNC_DELAY = timedelta(minutes=5)  # after the daily plan write
 STORAGE_VERSION = 1
-FRONTEND_VERSION = "0.6.1"
+FRONTEND_VERSION = "0.7.0"
 URL_BASE = "/k7_lamp"
 CARD_FILE = "k7-schedule-card.js"

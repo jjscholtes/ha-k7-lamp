@@ -3,6 +3,7 @@
 ## 0.7.0
 
 - Manual mode: a **Manual mode** switch and a **Manual <channel>** slider (0–100 %) per channel. They send the lamp's live mode and manual-level commands, so the schedule is left alone and the lamp doesn't pause for a full write. Tested on a K7 Pro IV: all channels at 100 % hold steady (about 93 W) until the switch goes back to auto.
+- New `custom:k7-light-card`: a small widget with the lamp's power draw (from `power_entity`, e.g. a smart plug) and a bar with the current level per colour, plus an on/off/manual pill and the next switch time. `navigation_path` makes it open another view.
 - Changing a manual level also updates the stored program's manual levels, so a later Apply doesn't put the old ones back.
 
 ## 0.6.1

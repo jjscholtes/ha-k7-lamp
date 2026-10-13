@@ -7,7 +7,7 @@
  * bundled presets come from bitbarista/k7-led-controller (MIT); see NOTICE.md.
  */
 const BASE = "/k7_lamp";
-const VERSION = "0.6.1";
+const VERSION = "0.7.0";
 // Physical LED colours: only used to mix the light colour of a slot (strip and chart backdrop).
 const COLORS = ["#f5f5f5", "#3b3bff", "#22c55e", "#9b30ff", "#00d5ff", "#ff3030"];
 // Chart colours per theme. Blue/UV and red/green stay close for colour-blind readers,
@@ -30,6 +30,7 @@ const STRINGS = {
     acc_window: "Daily update window starts at {t}.", acc_nowindow: "No safe dark interval; automatic updates are paused.",
     acc_confirmed: "Last confirmed: {p}.", unknown: "unknown", stop: "Stop…",
     seg_target: "Target", seg_draft: "Draft", seg_today: "Today", seg_lamp: "Lamp",
+    w_title: "Light", w_on: "On", w_off: "Off", w_off_at: "off at {t}", w_of_full: "{p}% of full power", w_fixed: "fixed levels",
     now: "Now", dark: "dark", on_at: "on at {t}", full: "full light", rising: "ramping up", falling: "ramping down",
     day_starts: "Day starts at", not_set: "not set", shift_to: "Shift to {h}",
     photoperiod: "Photoperiod", no_dark: "no dark period to shift", h: "h",
@@ -87,6 +88,7 @@ const STRINGS = {
     acc_window: "Dagelijkse update vanaf {t}.", acc_nowindow: "Geen veilige donkere periode; automatische updates staan stil.",
     acc_confirmed: "Laatst bevestigd: {p}.", unknown: "onbekend", stop: "Stop…",
     seg_target: "Doel", seg_draft: "Concept", seg_today: "Vandaag", seg_lamp: "Lamp",
+    w_title: "Licht", w_on: "Aan", w_off: "Uit", w_off_at: "uit om {t}", w_of_full: "{p}% van vol vermogen", w_fixed: "vaste waarden",
     now: "Nu", dark: "donker", on_at: "aan om {t}", full: "vol licht", rising: "opkomst", falling: "afbouw",
     day_starts: "Dag begint om", not_set: "niet ingesteld", shift_to: "Verschuif naar {h}",
     photoperiod: "Fotoperiode", no_dark: "geen donkere periode", h: "u",
@@ -1408,10 +1410,151 @@ const STYLE = `
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 `;
 
+
+// Compact widget: the lamp's power draw and how strong each colour is right now.
+class K7LightCard extends K7ScheduleCard {
+  setConfig(config) {
+    this._config = config || {};
+  }
+
+  static getStubConfig() {
+    return {};
+  }
+
+  getCardSize() {
+    return 3;
+  }
+
+  getGridOptions() {
+    return { columns: 12, min_columns: 6 };
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this.shadowRoot) {
+      this.attachShadow({ mode: "open" });
+      this._channels = ["White", "Royal Blue", "Green", "UV", "Cyan", "Red"];
+      this._load();
+    } else if (!this._loading && Date.now() - (this._loadedAt || 0) > 60000) {
+      this._load();
+    }
+    const key = [Math.floor(Date.now() / 60000), this._power(), this._dark()].join("|");
+    if (key !== this._key) {
+      this._key = key;
+      this._render();
+    }
+  }
+
+  async _load() {
+    this._loading = true;
+    try {
+      const data = await this._hass.callWS({ type: "k7_lamp/get" });
+      const want = this._config.entry_id;
+      this._channels = data.channels;
+      this._lamp = data.lamps.find((l) => !want || l.entry_id === want) || null;
+      this._err = this._lamp ? null : "No K7 lamp is loaded";
+    } catch (err) {
+      this._err = String(err?.message || err);
+    }
+    this._loading = false;
+    this._loadedAt = Date.now();
+    this._render();
+  }
+
+  _power() {
+    const st = this._config.power_entity && this._hass?.states[this._config.power_entity];
+    const v = Number(st?.state);
+    return st && Number.isFinite(v) ? v : null;
+  }
+
+  _status(levels) {
+    const lamp = this._lamp;
+    if (!lamp.available) return { cls: "bad", text: this._t("offline"), sub: "" };
+    if (!lamp.auto) return { cls: "warn", text: this._t("manual"), sub: this._t("w_fixed") };
+    const on = levels.some((v) => v >= 0.5);
+    const p = photoperiod(lamp.schedule || []);
+    const sub = p ? this._t(on ? "w_off_at" : "on_at", { t: fmtHour(on ? p[1] : p[0]) }) : "";
+    return { cls: on ? "ok" : "", text: this._t(on ? "w_on" : "w_off"), sub };
+  }
+
+  _render() {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const lamp = this._lamp;
+    const cols = this._colors();
+    let body;
+    if (!lamp) {
+      body = `<div class="loading">${esc(this._err || this._t("loading"))}</div>`;
+    } else {
+      const levels = (lamp.auto ? levelsAt(lamp.schedule || [], this._now()) : lamp.manual).map((v) => Math.round(v));
+      const st = this._status(levels);
+      const watt = this._power();
+      const mean = Math.round(levels.reduce((a, v) => a + v, 0) / (levels.length || 1));
+      const rows = this._stack().map((c) => `
+        <div class="ch${levels[c] ? "" : " zero"}">
+          <span class="dot" style="background:${cols[c]}"></span>
+          <span class="nm">${esc(this._chName(c))}</span>
+          <span class="bar"><b style="width:${levels[c]}%;background:${cols[c]}"></b></span>
+          <span class="pct">${levels[c]}%</span>
+        </div>`).join("");
+      body = `
+        <div class="w-main">
+          <div class="w-power">
+            <div class="w-big">${watt === null ? mean : Math.round(watt)}<small>${watt === null ? "%" : " W"}</small></div>
+            <div class="w-sub">${this._t("w_of_full", { p: mean })}</div>
+            ${st.sub ? `<div class="w-sub">${esc(st.sub)}</div>` : ""}
+          </div>
+          <div class="w-chs">${rows}</div>
+        </div>`;
+      body = `<div class="head w-head"><div class="w-title">${esc(this._config.title || this._t("w_title"))}</div>
+        <span class="pill ${st.cls}"><i></i>${esc(st.text)}</span></div>${body}`;
+    }
+    root.innerHTML = `<style>${STYLE}${WIDGET_STYLE}</style>
+      <ha-card class="${this._dark() ? "dark" : "light"}${this._config.navigation_path ? " nav" : ""}">${body}</ha-card>`;
+    const path = this._config.navigation_path;
+    if (path) {
+      root.querySelector("ha-card").addEventListener("click", () => {
+        history.pushState(null, "", path);
+        window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+      });
+    }
+  }
+
+  disconnectedCallback() {}
+}
+
+const WIDGET_STYLE = `
+  ha-card { padding: 16px 18px 16px; border-radius: 22px; }
+  ha-card.nav { cursor: pointer; }
+  .w-head { margin-bottom: 10px; }
+  .w-title { font-size: 17px; font-weight: 600; letter-spacing: -.01em; margin-right: auto; }
+  .w-main { display: grid; grid-template-columns: minmax(96px, auto) 1fr; gap: 6px 22px; align-items: center; }
+  .w-big { font-size: 44px; font-weight: 700; letter-spacing: -.035em; line-height: 1; }
+  .w-big small { font-size: 20px; font-weight: 600; letter-spacing: -.01em; color: var(--k7-ink2); margin-left: 2px; }
+  .w-sub { font-size: 13px; color: var(--k7-ink2); margin-top: 6px; }
+  .w-sub + .w-sub { margin-top: 1px; }
+  .w-chs { display: grid; gap: 6px; min-width: 0; }
+  .ch { display: grid; grid-template-columns: 8px minmax(64px, auto) 1fr 38px; align-items: center; gap: 8px; font-size: 13px; }
+  .ch .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .ch .nm { color: var(--k7-ink2); white-space: nowrap; }
+  .ch .bar { height: 6px; border-radius: 3px; background: var(--k7-fill); overflow: hidden; }
+  .ch .bar b { display: block; height: 100%; border-radius: 3px; transition: width .4s ease; }
+  .ch .pct { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ch.zero .nm, .ch.zero .pct { color: var(--k7-ink3); }
+  .ch.zero .dot { opacity: .35; }
+  @media (max-width: 420px) { .w-main { grid-template-columns: 1fr; } }
+`;
+
+customElements.define("k7-light-card", K7LightCard);
 customElements.define("k7-schedule-card", K7ScheduleCard);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "k7-schedule-card",
   name: "K7 schedule editor",
   description: "Edit, import (QR) and apply the Noo-Psyche K7 lamp schedule.",
+});
+window.customCards.push({
+  type: "k7-light-card",
+  name: "K7 light",
+  description: "Power draw of the Noo-Psyche K7 lamp and how strong each colour is right now.",
 });

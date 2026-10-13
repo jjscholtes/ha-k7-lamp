@@ -22,6 +22,7 @@ Looking for a complete setup? [`examples/aquarium`](examples/aquarium) has a ful
   - drag the 24-hour curve for each channel, or fine-tune one hour with sliders
   - a colour preview strip shows the blended colour for each hour
   - save profiles, or load built-in and community presets
+- **Light widget:** `custom:k7-light-card` shows the lamp's power draw (`power_entity`, e.g. a smart plug) and how strong each colour is right now. Optional: `navigation_path`, `title`, `entry_id`.
 - **QR codes:**
   - import a schedule shared as a Noo-Psyche app QR code by pasting its text, choosing a screenshot, or scanning it with the camera
   - export your schedule as a QR code the app can read
